@@ -1,0 +1,19 @@
+{
+  "app": {
+    "name": "Rotorflight",
+    "version": "1.0.0",
+    "description": "Advanced Rotorflight configuration suite"
+  },
+  "messages": {
+    "welcome": "Welcome to Rotorflight",
+    "connecting": "Connecting to radio...",
+    "connected": "Connected successfully",
+    "error": "An error occurred",
+    "deploy.success": "Deployment successful",
+    "deploy.failed": "Deployment failed"
+  },
+  "status": {
+    "device_name": "Rotorflight Suite",
+    "ready": "Ready"
+  }
+}
