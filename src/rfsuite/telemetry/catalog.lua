@@ -44,7 +44,7 @@ local function normalizeBatteryProfileIndex(value)
 end
 
 local function resolveBatteryCapacity(batteryConfig)
-    local task = getTelemetryTask()
+    local session = framework and framework.session or nil
     local activeProfile
     local profiles
 
@@ -52,7 +52,7 @@ local function resolveBatteryCapacity(batteryConfig)
         return nil
     end
 
-    activeProfile = task and task.getSensor and task.getSensor("battery_profile") or nil
+    activeProfile = session and session:get("activeBatteryProfile", nil) or nil
     activeProfile = normalizeBatteryProfileIndex(activeProfile)
     profiles = batteryConfig.profiles
 
@@ -129,7 +129,7 @@ local function computeSmartconsumption()
 
     if batteryConfig then
         capacity = resolveBatteryCapacity(batteryConfig)
-        remainingPercent = telemetry.getSensor and telemetry.getSensor("smartfuel") or nil
+        remainingPercent = computeSmartfuel()
         if capacity and remainingPercent ~= nil then
             return math.floor(capacity * (1 - (remainingPercent / 100))), UNIT_MILLIAMPERE_HOUR, "mAh"
         end

@@ -285,6 +285,7 @@ function SensorsTask:init(framework)
     }
     self.transportProvider = nil
     self.transportProviderName = nil
+    self.wakeupTick = 0
     self:_resetTelemetryConfigBootstrap()
     self:_resetBatteryConfigBootstrap()
     self:_armSensorLostMute(os.clock())
@@ -324,6 +325,7 @@ function SensorsTask:wakeup()
     local transportProvider = self:_ensureTransportProvider()
     local session = self.framework.session
     local now = os.clock()
+    local phase
 
     self:_muteSensorLostDuringStartup(now)
     if self.providers.msp and self.providers.msp.seedStartupPlaceholders then
@@ -345,11 +347,19 @@ function SensorsTask:wakeup()
         transportProvider:wakeup()
     end
 
-    if self.providers.msp and self.providers.msp.wakeup then
+    self.wakeupTick = (self.wakeupTick or 0) + 1
+    phase = self.wakeupTick % 2
+
+    if phase == 0 and self.providers.msp and self.providers.msp.wakeup then
         self.providers.msp:wakeup()
     end
 
-    if self.providers.smart and self.providers.smart.wakeup then
+    if phase == 1
+        and self.providers.smart
+        and self.providers.smart.wakeup
+        and session:get("postConnectComplete", false) == true
+        and type(session:get("batteryConfig", nil)) == "table"
+    then
         self.providers.smart:wakeup()
     end
 end
@@ -366,6 +376,7 @@ function SensorsTask:reset()
 
     self.transportProvider = nil
     self.transportProviderName = nil
+    self.wakeupTick = 0
     self:_resetTelemetryConfigBootstrap()
     self:_resetBatteryConfigBootstrap()
     BatteryConfig.clearSession(self.framework.session)

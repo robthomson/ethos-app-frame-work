@@ -18,6 +18,7 @@ local CRSF_FRAME_CUSTOM_TELEM = 0x88
 local REFRESH_INTERVAL_MS = 2500
 local DEFAULT_POP_BUDGET_SECONDS = 0.2
 local DEFAULT_PUBLISH_BUDGET_PER_FRAME = 50
+local DEFAULT_MAX_FRAMES_PER_WAKEUP = 4
 local DEFAULT_DIAG_LOG_COOLDOWN_SECONDS = 2.0
 local DEFAULT_WAKEUP_BUDGET_LOG_EVERY = 25
 local SID_LOOKUP_MODULE = "sensors.providers.elrs_sid_lookup"
@@ -184,6 +185,7 @@ function Provider.new(framework)
         diagLogCooldownSeconds = DEFAULT_DIAG_LOG_COOLDOWN_SECONDS,
         wakeupBudgetLogEvery = DEFAULT_WAKEUP_BUDGET_LOG_EVERY,
         popBudgetSeconds = (framework.config and framework.config.elrsPopBudgetSeconds) or DEFAULT_POP_BUDGET_SECONDS,
+        maxFramesPerWakeup = (framework.config and framework.config.elrsMaxFramesPerWakeup) or DEFAULT_MAX_FRAMES_PER_WAKEUP,
         sensors = {},
         lastValues = {},
         lastTimes = {},
@@ -547,12 +549,16 @@ function Provider:_crossfirePop()
     published = 0
     publishOverflowed = false
 
-    while ptr < #data do
+    for _ = 1, #data do
         local sensor
         local previousPtr
         local ok
         local value
         local nextPtr
+
+        if ptr >= #data then
+            break
+        end
 
         sid, ptr = decU16(data, ptr)
         sensor = self.sensorsList[sid]
@@ -738,6 +744,8 @@ function Provider:wakeup()
     local budget
     local deadline
     local popCount
+    local maxFrames
+    local frameIndex
 
     if not self:_sessionGet("isConnected", false) then
         return
@@ -748,9 +756,14 @@ function Provider:wakeup()
     if self:_sessionGet("telemetryState", false) and self:_sessionGet("telemetrySensor", nil) then
         budget = self.popBudgetSeconds or DEFAULT_POP_BUDGET_SECONDS
         deadline = budget > 0 and (os_clock() + budget) or nil
+        maxFrames = tonumber(self.maxFramesPerWakeup) or DEFAULT_MAX_FRAMES_PER_WAKEUP
         popCount = 0
 
-        while self:_crossfirePop() do
+        for frameIndex = 1, maxFrames do
+            if not self:_crossfirePop() then
+                break
+            end
+
             popCount = popCount + 1
             if deadline and os_clock() >= deadline then
                 self.wakeupBudgetBreakCount = self.wakeupBudgetBreakCount + 1

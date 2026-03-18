@@ -424,17 +424,28 @@ function TelemetryTask:_getSensor(sensorKey, paramMin, paramMax, paramThresholds
         return nil
     end
 
+    self._resolvingSensors = self._resolvingSensors or {}
+    if self._resolvingSensors[sensorKey] == true then
+        return nil
+    end
+
+    self._resolvingSensors[sensorKey] = true
+
     if type(entry.source) == "function" then
-        return entry.source(paramMin, paramMax, paramThresholds)
+        value, major, minor = entry.source(paramMin, paramMax, paramThresholds)
+        self._resolvingSensors[sensorKey] = nil
+        return value, major, minor
     end
 
     source = self:_getSensorSource(sensorKey)
     if not source then
+        self._resolvingSensors[sensorKey] = nil
         return nil
     end
 
     value, major, minor = getSourceValue(source)
     if value == nil then
+        self._resolvingSensors[sensorKey] = nil
         return nil
     end
 
@@ -442,10 +453,16 @@ function TelemetryTask:_getSensor(sensorKey, paramMin, paramMax, paramThresholds
         value = entry.transform(value)
     end
 
+    if sensorKey == "battery_profile" then
+        self.framework.session:set("activeBatteryProfile", value)
+    end
+
     if type(entry.localizations) == "function" then
+        self._resolvingSensors[sensorKey] = nil
         return entry.localizations(value, paramMin, paramMax, paramThresholds)
     end
 
+    self._resolvingSensors[sensorKey] = nil
     return value, major or entry.unit, minor, paramMin, paramMax, paramThresholds
 end
 
@@ -571,6 +588,7 @@ function TelemetryTask:init(framework)
     self._memoListSwitchSensors = nil
     self._memoListAudioUnits = nil
     self._lastOnchangeAt = 0
+    self._resolvingSensors = {}
 
     for key, entry in pairs(catalog) do
         if entry.stats then

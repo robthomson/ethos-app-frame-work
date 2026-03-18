@@ -692,6 +692,11 @@ function AudioTask:wakeup()
     end
 
     self:_handleConnectBeep(now)
+
+    if self.framework.session:get("postConnectComplete", false) ~= true then
+        return
+    end
+
     self:_announceModelName(now)
     self:_handleArmGovernorEvents(now)
     self:_handleProfileCallouts(now)
