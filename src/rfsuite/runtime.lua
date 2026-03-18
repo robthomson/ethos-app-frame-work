@@ -17,6 +17,7 @@ local FlightModeTask = require("tasks.flightmode")
 local SensorsTask = require("tasks.sensors")
 local TimerTask = require("tasks.timer")
 local AudioTask = require("tasks.audio")
+local LoggingTask = require("tasks.logging")
 
 local runtime = {}
 runtime._backgroundStatusValues = {}
@@ -250,6 +251,12 @@ function runtime.ensureFramework()
     framework:registerTask("audio", AudioTask, {
         priority = 8,
         interval = 0.10,
+        enabled = true
+    })
+
+    framework:registerTask("logging", LoggingTask, {
+        priority = 7,
+        interval = 0.50,
         enabled = true
     })
 
