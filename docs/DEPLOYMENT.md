@@ -6,8 +6,11 @@ The project has been reorganized to match the rfsuite/betaflight pattern:
 
 ```
 ethos-app-frame-work/
+├── deploy.json                      ← Shared deploy configuration
+├── deploy.example.json              ← Full example with Ethos Suite paths
+│
 ├── src/
-│   └── rotorflight/                 ← All source code here
+│   └── rfsuite/                     ← All source code here
 │       ├── main.lua                 ← Entry point
 │       ├── framework/               ← Core framework
 │       │   ├── core/
@@ -20,7 +23,7 @@ ethos-app-frame-work/
 │   ├── tasks.json                   ← Build tasks
 │   ├── launch.json                  ← Debug configs
 │   ├── settings.json                ← VS Code settings
-│   ├── deploy.json                  ← Deploy configuration
+│   ├── deploy.json                  ← Optional local override
 │   └── scripts/
 │       └── deploy.py                ← Deployment script
 │
@@ -379,22 +382,23 @@ Edit `.vscode/settings.json`:
 
 ### Custom Radio Mount
 
-Edit `.vscode/deploy.json`:
+Edit `deploy.json` for shared defaults, or `.vscode/deploy.json` for a local override:
 
 ```json
 {
-  "radio_mount": "E:/",
-  "target_dir": "/SCRIPTS/rotorflight"
+  "tgt_name": "rfsuite",
+  "serial_name_hint": "FrSky"
 }
 ```
 
 ### Custom Deployment Configuration
 
 The deploy script looks for:
-1. `.vscode/deploy.json` (if exists)
-2. Default values if not found
+1. `deploy.json` in the repo root
+2. `.vscode/deploy.json` as an optional local override layered on top
 
-Create `.vscode/deploy.json` to override defaults.
+Use the committed `deploy.json` for team-wide defaults.
+Create `.vscode/deploy.json` only when you need machine-specific overrides.
 
 ---
 
@@ -441,7 +445,9 @@ python .vscode/scripts/deploy.py --help
 | `.vscode/tasks.json` | VS Code build tasks |
 | `.vscode/launch.json` | Debug launch configs |
 | `.vscode/settings.json` | VS Code project settings |
-| `.vscode/deploy.json` | Deployment configuration |
+| `deploy.json` | Shared deployment configuration |
+| `deploy.example.json` | Full example configuration |
+| `.vscode/deploy.json` | Optional local deployment override |
 | `.vscode/scripts/deploy.py` | Main deployment script |
 
 ---
@@ -451,12 +457,12 @@ python .vscode/scripts/deploy.py --help
 If you want to use Ethos Suite for deployment instead:
 
 1. Install Ethos Suite
-2. Update `.vscode/deploy.json`:
+2. Update `deploy.json` or `.vscode/deploy.json`:
    ```json
    {
-     "use_ethossuite": true
+     "ethossuite_bin": "C:\\Program Files\\Ethos Suite\\Ethos Suite.exe"
    }
    ```
-3. Update `deploy.py` to use Ethos Suite APIs
+3. Run the normal deploy commands; the script will use Ethos Suite automatically when configured
 
 (See rfsuite for full example)

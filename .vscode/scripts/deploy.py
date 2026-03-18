@@ -726,33 +726,36 @@ config = {
     "git_src": str(ROOT),
 }
 
-cfg_path = None
+loaded_cfg_paths = []
+
+def _load_json_config(path: Path, label: str):
+    try:
+        with open(path, "r") as f:
+            user_cfg = json.load(f)
+        if not isinstance(user_cfg, dict):
+            raise ValueError("Config JSON must contain an object at the top level.")
+        config.update(user_cfg)
+        loaded_cfg_paths.append(path)
+        print(f"[CONFIG] Loaded {label}: {path}")
+    except Exception as e:
+        print(f"[ERROR] Failed to load {label} at {path}: {e}")
+        sys.exit(1)
+
 if ROOT_CONFIG.exists():
-    cfg_path = ROOT_CONFIG
-elif VSCODE_CONFIG.exists():
-    cfg_path = VSCODE_CONFIG
-else:
+    _load_json_config(ROOT_CONFIG, "shared config")
+
+if VSCODE_CONFIG.exists():
+    _load_json_config(VSCODE_CONFIG, "local override")
+
+if not loaded_cfg_paths:
     print("[ERROR] No deploy.json found in git root or .vscode/")
     sys.exit(1)
 
-# NEW: Debug which base config file we are using
-print(f"[CONFIG] Using base config file: {cfg_path}")
-
-try:
-    with open(cfg_path, "r") as f:
-        user_cfg = json.load(f)
-    if not isinstance(user_cfg, dict):
-        raise ValueError("Config JSON must contain an object at the top level.")
-    config.update(user_cfg)
-except Exception as e:
-    print(f"[ERROR] Failed to load config: {e}")
-    sys.exit(1)
-
 if "tgt_name" not in config or not config["tgt_name"]:
-    print(f"[ERROR] Missing 'tgt_name' in {cfg_path}. Aborting.")
+    print(f"[ERROR] Missing 'tgt_name' in {loaded_cfg_paths[-1]}. Aborting.")
     sys.exit(1)
 
-CONFIG_PATH = str(cfg_path)
+CONFIG_PATH = str(VSCODE_CONFIG if VSCODE_CONFIG.exists() else ROOT_CONFIG)
 
 pbar = None
 
