@@ -1,131 +1,28 @@
 --[[
-  Copyright (C) 2025 Rotorflight Project
+  Copyright (C) 2026 Rotorflight Project
   GPLv3 — https://www.gnu.org/licenses/gpl-3.0.en.html
 ]] --
 
---[[
-ELRS sensor memory strategy:
-- Keep the large full SID definition table in `elrs_sensors.lua`.
-- Keep telemetry slot->SID mapping in `elrs_sid_lookup.lua`.
-- Rebuild a runtime table on demand:
-  - relevant SIDs keep full metadata + decoder
-  - non-relevant SIDs keep decoder only (for parser alignment)
-- Drop the full table after rebuild and rebuild again after reset/session restart.
-
-Flow summary:
-1. Build relevant SID set from telemetry config slots.
-2. Load full SID map, reduce to runtime map, then release full table.
-3. Decode all incoming SIDs to preserve parser alignment.
-4. Publish values only for runtime entries that still include metadata (`name`).
-]]
-
-local framework = require("framework.core.init")
 local utils = require("lib.utils")
 
-local config = framework.config or {}
+local Provider = {}
+Provider.__index = Provider
+
 local os_clock = os.clock
 local math_floor = math.floor
+local string_format = string.format
 local system_getSource = system.getSource
 local model_createSensor = model.createSensor
-local string_format = string.format
-local load_file = loadfile
-
-local elrs = {}
-elrs.name = "elrs"
-
-local function sessionGet(key, default)
-    return framework.session:get(key, default)
-end
-
-local function moduleNumberForSession()
-    local source = sessionGet("telemetrySensor", nil)
-
-    if source and type(source.module) == "function" then
-        return source:module()
-    end
-
-    return sessionGet("telemetryModuleNumber", 0) or 0
-end
-
-local function syncSensorMetadata(sensor, name, unit, dec, min, max)
-    if not sensor then
-        return
-    end
-
-    if name ~= nil then
-        pcall(sensor.name, sensor, name)
-    end
-    pcall(sensor.module, sensor, moduleNumberForSession())
-    if min ~= nil then
-        pcall(sensor.minimum, sensor, min)
-    end
-    if max ~= nil then
-        pcall(sensor.maximum, sensor, max)
-    end
-    if dec ~= nil then
-        pcall(sensor.decimals, sensor, dec)
-        pcall(sensor.protocolDecimals, sensor, dec)
-    end
-    if unit ~= nil then
-        pcall(sensor.unit, sensor, unit)
-        pcall(sensor.protocolUnit, sensor, unit)
-    end
-end
-
-local useRawValue = utils.ethosVersionAtLeast({26, 1, 0})
-
-local cachedCrsfSensor = nil
-
-local function currentCrsfSensor()
-    if cachedCrsfSensor then
-        return cachedCrsfSensor
-    end
-
-    if crsf and crsf.getSensor ~= nil then
-        cachedCrsfSensor = crsf.getSensor()
-        return cachedCrsfSensor
-    end
-
-    return nil
-end
-
-elrs.popFrame = function(...)
-    local sensor = currentCrsfSensor()
-
-    if sensor and sensor.popFrame then
-        return sensor:popFrame(...)
-    end
-    if crsf and crsf.popFrame then
-        return crsf.popFrame(...)
-    end
-
-    return nil
-end
-
-elrs.pushFrame = function(x, y)
-    local sensor = currentCrsfSensor()
-
-    if sensor and sensor.pushFrame then
-        return sensor:pushFrame(x, y)
-    end
-    if crsf and crsf.pushFrame then
-        return crsf.pushFrame(x, y)
-    end
-
-    return nil
-end
-
-local sensors = {}
-sensors['uid'] = {}
-sensors['lastvalue'] = {}
-sensors['lasttime'] = {}
 
 local CRSF_FRAME_CUSTOM_TELEM = 0x88
-
-elrs.publishBudgetPerFrame = 50  -- If everything works this should never be reached.  we use it as a safeguard.
+local REFRESH_INTERVAL_MS = 2500
+local DEFAULT_POP_BUDGET_SECONDS = 0.2
+local DEFAULT_PUBLISH_BUDGET_PER_FRAME = 50
+local DEFAULT_DIAG_LOG_COOLDOWN_SECONDS = 2.0
+local DEFAULT_WAKEUP_BUDGET_LOG_EVERY = 25
 
 local META_UID = {
-    [0xEE01] = true, 
+    [0xEE01] = true,
     [0xEE02] = true,
     [0xEE03] = true,
     [0xEE04] = true,
@@ -133,161 +30,74 @@ local META_UID = {
     [0xEE06] = true
 }
 
-elrs.strictUntilConfig = false
+local function loadLuaModule(moduleName, path)
+    local ok
+    local result
+    local chunk
+    local loadErr
 
-function elrs.new(_)
-    return elrs
+    ok, result = pcall(require, moduleName)
+    if ok then
+        return result
+    end
+
+    if not loadfile then
+        return nil, result
+    end
+
+    chunk, loadErr = loadfile(path)
+    if not chunk then
+        return nil, loadErr or result
+    end
+
+    ok, result = pcall(chunk)
+    if ok then
+        return result
+    end
+
+    return nil, result
 end
 
-local function loadSidLookup()
-    local lookupLoader, lookupErr = load_file("sensors/providers/elrs_sid_lookup.lua")
-    if not lookupLoader then
-        utils.log("[elrs] Failed to load SID lookup table: " .. tostring(lookupErr), "error")
+local sidLookup, sidLookupErr = loadLuaModule(
+    "sensors.providers.elrs_sid_lookup",
+    "sensors/providers/elrs_sid_lookup.lua"
+)
+if type(sidLookup) ~= "table" then
+    utils.log("[elrs] Failed to load SID lookup table: " .. tostring(sidLookupErr or "invalid_table"), "error")
+    sidLookup = {}
+end
+
+local sensorListFactory, sensorListFactoryErr = loadLuaModule(
+    "sensors.providers.elrs_sensors",
+    "sensors/providers/elrs_sensors.lua"
+)
+if type(sensorListFactory) ~= "function" then
+    utils.log("[elrs] Failed to load sensor list factory: " .. tostring(sensorListFactoryErr or "invalid_factory"), "error")
+    sensorListFactory = function()
         return {}
     end
-
-    local lookupTable = lookupLoader()
-    if type(lookupTable) ~= "table" then
-        utils.log("[elrs] SID lookup file did not return a table", "error")
-        return {}
-    end
-
-    return lookupTable
 end
 
-local sidLookup = loadSidLookup()
-
-elrs._relevantSig = nil
-elrs._relevantSidSet = nil
-
-local function telemetrySlotsSignature(slots)
-    local parts = {}
-    for i, v in ipairs(slots) do parts[#parts + 1] = tostring(v or 0) end
-    return table.concat(parts, ",")
+local function decNil(_, pos)
+    return nil, pos
 end
 
-local function resetSensors()
-    sensors['uid'] = {}
-    sensors['lastvalue'] = {}
-    sensors['lasttime'] = {}
+local function decU8(data, pos)
+    return data[pos], pos + 1
 end
-
-local function rebuildRelevantSidSet()
-    local cfg = sessionGet("telemetryConfig", nil)
-    if not cfg then
-        elrs._relevantSidSet = nil
-        elrs._relevantSig = nil
-        return
-    end
-
-    local sig = telemetrySlotsSignature(cfg)
-    if elrs._relevantSidSet ~= nil and elrs._relevantSig == sig then return end
-
-    elrs._relevantSidSet = {}
-    elrs._relevantSig = sig
-
-    for _, slotId in ipairs(cfg) do
-        local apps = sidLookup[slotId]
-        if apps then
-            for _, sid in ipairs(apps) do
-                if sid then elrs._relevantSidSet[sid] = true end
-            end
-        end
-    end
-end
-
-local function sidIsRelevant(sid)
-    if META_UID[sid] then return true end
-    if elrs._relevantSidSet == nil then return not elrs.strictUntilConfig end
-    return elrs._relevantSidSet[sid] == true
-end
-
-local function nowMs() return math_floor(os_clock() * 1000) end
-local REFRESH_INTERVAL_MS = 2500
-
-local function createTelemetrySensor(uid, name, unit, dec, value, min, max)
-    if sessionGet("telemetryState", false) == false then return end
-
-    sensors['uid'][uid] = model_createSensor({type = SENSOR_TYPE_DIY})
-    sensors['uid'][uid]:appId(uid)
-    syncSensorMetadata(sensors['uid'][uid], name, unit, dec, min or -1000000000, max or 2147483647)
-    if value ~= nil then
-        if useRawValue then
-            sensors['uid'][uid]:rawValue(value)
-        else
-            sensors['uid'][uid]:value(value)
-        end
-        sensors['lastvalue'][uid] = value
-        sensors['lasttime'][uid] = nowMs()
-    end
-end
-
-local function refreshStaleSensors()
-    local t = nowMs()
-    for uid, s in pairs(sensors['uid']) do
-        local last = sensors['lastvalue'][uid]
-        local lt = sensors['lasttime'][uid]
-        if s and last ~= nil and lt and (t - lt) > REFRESH_INTERVAL_MS then
-            if useRawValue then
-                s:rawValue(last)
-            else
-                s:value(last)
-            end    
-            sensors['lasttime'][uid] = t
-        end
-    end
-end
-
-local function setTelemetryValue(uid, subid, instance, value, unit, dec, name, min, max)
-    if sessionGet("telemetryState", false) == false then return end
-
-    if not sidIsRelevant(uid) then return end
-
-    if sensors['uid'][uid] == nil then
-        sensors['uid'][uid] = system_getSource({category = CATEGORY_TELEMETRY_SENSOR, appId = uid})
-        if sensors['uid'][uid] == nil then
-            utils.log("Create sensor: " .. tostring(uid), "debug")
-            createTelemetrySensor(uid, name, unit, dec, value, min, max)
-        else
-            syncSensorMetadata(sensors['uid'][uid], name, unit, dec, min, max)
-        end
-    else
-        if sensors['uid'][uid] then
-            syncSensorMetadata(sensors['uid'][uid], name, unit, dec, min, max)
-            if sensors['lastvalue'][uid] == nil or sensors['lastvalue'][uid] ~= value then
-                if useRawValue then
-                    sensors['uid'][uid]:rawValue(value)
-                else
-                    sensors['uid'][uid]:value(value)
-                end
-                sensors['lastvalue'][uid] = value
-                sensors['lasttime'][uid] = nowMs()
-            end
-
-            if sensors['uid'][uid]:state() == false then
-                sensors['uid'][uid] = nil
-                sensors['lastvalue'][uid] = nil
-                sensors['lasttime'][uid] = nil
-            end
-
-        end
-    end
-end
-
-local function decNil(data, pos) return nil, pos end
-
-local function decU8(data, pos) return data[pos], pos + 1 end
 
 local function decS8(data, pos)
-    local val, ptr = decU8(data, pos)
-    return val < 0x80 and val or val - 0x100, ptr
+    local value, ptr = decU8(data, pos)
+    return value < 0x80 and value or value - 0x100, ptr
 end
 
-local function decU16(data, pos) return (data[pos] << 8) | data[pos + 1], pos + 2 end
+local function decU16(data, pos)
+    return (data[pos] << 8) | data[pos + 1], pos + 2
+end
 
 local function decS16(data, pos)
-    local val, ptr = decU16(data, pos)
-    return val < 0x8000 and val or val - 0x10000, ptr
+    local value, ptr = decU16(data, pos)
+    return value < 0x8000 and value or value - 0x10000, ptr
 end
 
 local function decU12U12(data, pos)
@@ -301,117 +111,446 @@ local function decS12S12(data, pos)
     return a < 0x0800 and a or a - 0x1000, b < 0x0800 and b or b - 0x1000, ptr
 end
 
-local function decU24(data, pos) return (data[pos] << 16) | (data[pos + 1] << 8) | data[pos + 2], pos + 3 end
-
-local function decS24(data, pos)
-    local val, ptr = decU24(data, pos)
-    return val < 0x800000 and val or val - 0x1000000, ptr
+local function decU24(data, pos)
+    return (data[pos] << 16) | (data[pos + 1] << 8) | data[pos + 2], pos + 3
 end
 
-local function decU32(data, pos) return (data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3], pos + 4 end
+local function decS24(data, pos)
+    local value, ptr = decU24(data, pos)
+    return value < 0x800000 and value or value - 0x1000000, ptr
+end
+
+local function decU32(data, pos)
+    return (data[pos] << 24) | (data[pos + 1] << 16) | (data[pos + 2] << 8) | data[pos + 3], pos + 4
+end
 
 local function decS32(data, pos)
-    local val, ptr = decU32(data, pos)
-    return val < 0x80000000 and val or val - 0x100000000, ptr
+    local value, ptr = decU32(data, pos)
+    return value < 0x80000000 and value or value - 0x100000000, ptr
 end
 
 local function decCellV(data, pos)
-    local val, ptr = decU8(data, pos)
-    return val > 0 and val + 200 or 0, ptr
+    local value, ptr = decU8(data, pos)
+    return value > 0 and value + 200 or 0, ptr
 end
 
-local function decCells(data, pos)
-    local cnt, val, vol
-    cnt, pos = decU8(data, pos)
-    setTelemetryValue(0x1020, 0, 0, cnt, UNIT_RAW, 0, "Cell Count", 0, 15)
-    for i = 1, cnt do
-        val, pos = decU8(data, pos)
-        val = val > 0 and val + 200 or 0
-        vol = (cnt << 24) | ((i - 1) << 16) | val
-        setTelemetryValue(0x102F, 0, 0, vol, UNIT_CELLS, 2, "Cell Voltages", 0, 455)
+local function nowMs()
+    return math_floor(os_clock() * 1000)
+end
+
+local function telemetrySlotsSignature(slots)
+    local parts = {}
+    local i
+
+    for i = 1, #slots do
+        parts[#parts + 1] = tostring(slots[i] or 0)
     end
-    return nil, pos
+
+    return table.concat(parts, ",")
 end
 
-local function decControl(data, pos)
-    local r, p, y, c
-    p, r, pos = decS12S12(data, pos)
-    y, c, pos = decS12S12(data, pos)
-    setTelemetryValue(0x1031, 0, 0, p, UNIT_DEGREE, 2, "Pitch Control", -4500, 4500)
-    setTelemetryValue(0x1032, 0, 0, r, UNIT_DEGREE, 2, "Roll Control", -4500, 4500)
-    setTelemetryValue(0x1033, 0, 0, 3 * y, UNIT_DEGREE, 2, "Yaw Control", -9000, 9000)
-    setTelemetryValue(0x1034, 0, 0, c, UNIT_DEGREE, 2, "Coll Control", -4500, 4500)
-    return nil, pos
-end
-
-local function decAttitude(data, pos)
-    local p, r, y
-    p, pos = decS16(data, pos)
-    r, pos = decS16(data, pos)
-    y, pos = decS16(data, pos)
-    setTelemetryValue(0x1101, 0, 0, p, UNIT_DEGREE, 1, "Pitch Attitude", -1800, 3600)
-    setTelemetryValue(0x1102, 0, 0, r, UNIT_DEGREE, 1, "Roll Attitude", -1800, 3600)
-    setTelemetryValue(0x1103, 0, 0, y, UNIT_DEGREE, 1, "Yaw Attitude", -1800, 3600)
-    return nil, pos
-end
-
-local function decAccel(data, pos)
-    local x, y, z
-    x, pos = decS16(data, pos)
-    y, pos = decS16(data, pos)
-    z, pos = decS16(data, pos)
-    setTelemetryValue(0x1111, 0, 0, x, UNIT_G, 2, "Accel X", -4000, 4000)
-    setTelemetryValue(0x1112, 0, 0, y, UNIT_G, 2, "Accel Y", -4000, 4000)
-    setTelemetryValue(0x1113, 0, 0, z, UNIT_G, 2, "Accel Z", -4000, 4000)
-    return nil, pos
-end
-
-local function decLatLong(data, pos)
-    local lat, lon
-    lat, pos = decS32(data, pos)
-    lon, pos = decS32(data, pos)
-
-    lat = math_floor(lat * 0.001)
-    lon = math_floor(lon * 0.001)
-
-    setTelemetryValue(0x1125, 0, 0, lat, UNIT_DEGREE, 4, "@i18n(sensors.gps.latitude)@", -10000000000, 10000000000)
-    setTelemetryValue(0x112B, 0, 0, lon, UNIT_DEGREE, 4, "@i18n(sensors.gps.longitude)@", -10000000000, 10000000000)
-    return nil, pos
-end
-
-local function decAdjFunc(data, pos)
-    local fun, val
-    fun, pos = decU16(data, pos)
-    val, pos = decS32(data, pos)
-    setTelemetryValue(0x1221, 0, 0, fun, UNIT_RAW, 0, "@i18n(sensors.control.adjustment_source)@", 0, 255)
-    setTelemetryValue(0x1222, 0, 0, val, UNIT_RAW, 0, "@i18n(sensors.control.adjustment_value)@")
-    return nil, pos
-end
-
-local sensorsList = {}
-local activeSensorsListSig = nil
-
-local function rebuildActiveSensorsList(force)
-    local sig = elrs._relevantSig or "__all__"
-    if not force and activeSensorsListSig == sig and next(sensorsList) ~= nil then return end
-
-    local listLoader, listErr = load_file("sensors/providers/elrs_sensors.lua")
-    if not listLoader then
-        utils.log("[elrs] Failed to load sensor list: " .. tostring(listErr), "error")
-        sensorsList = {}
-        activeSensorsListSig = sig
+local function syncSensorMetadata(sensor, name, unit, decimals, minValue, maxValue, moduleNumber)
+    if not sensor then
         return
     end
 
-    local listFactory = listLoader()
-    if type(listFactory) ~= "function" then
-        utils.log("[elrs] Sensor list file did not return a factory function", "error")
-        sensorsList = {}
-        activeSensorsListSig = sig
+    if name ~= nil then
+        pcall(sensor.name, sensor, name)
+    end
+    if moduleNumber ~= nil then
+        pcall(sensor.module, sensor, moduleNumber)
+    end
+    if minValue ~= nil then
+        pcall(sensor.minimum, sensor, minValue)
+    end
+    if maxValue ~= nil then
+        pcall(sensor.maximum, sensor, maxValue)
+    end
+    if decimals ~= nil then
+        pcall(sensor.decimals, sensor, decimals)
+        pcall(sensor.protocolDecimals, sensor, decimals)
+    end
+    if unit ~= nil then
+        pcall(sensor.unit, sensor, unit)
+        pcall(sensor.protocolUnit, sensor, unit)
+    end
+end
+
+function Provider.new(framework)
+    local self = setmetatable({
+        framework = framework,
+        useRawValue = utils.ethosVersionAtLeast({26, 1, 0}),
+        strictUntilConfig = false,
+        publishBudgetPerFrame = DEFAULT_PUBLISH_BUDGET_PER_FRAME,
+        diagLogCooldownSeconds = DEFAULT_DIAG_LOG_COOLDOWN_SECONDS,
+        wakeupBudgetLogEvery = DEFAULT_WAKEUP_BUDGET_LOG_EVERY,
+        popBudgetSeconds = (framework.config and framework.config.elrsPopBudgetSeconds) or DEFAULT_POP_BUDGET_SECONDS,
+        sensors = {},
+        lastValues = {},
+        lastTimes = {},
+        cachedCrsfSensor = nil,
+        relevantSig = nil,
+        relevantSidSet = nil,
+        sensorsList = {},
+        activeSensorsListSig = nil,
+        decoderExports = nil,
+        telemetryFrameId = 0,
+        telemetryFrameSkip = 0,
+        telemetryFrameCount = 0,
+        lastFrameMs = nil,
+        haveFrameId = false,
+        publishOverflowCount = 0,
+        wakeupBudgetBreakCount = 0,
+        parseBreakCount = 0,
+        lastDiagLogAt = {
+            publish_overflow = 0,
+            wakeup_budget = 0,
+            parse_break = 0
+        }
+    }, Provider)
+
+    self.decoderExports = self:_buildDecoderExports()
+    return self
+end
+
+function Provider:_sessionGet(key, default)
+    return self.framework.session:get(key, default)
+end
+
+function Provider:_moduleNumber()
+    local source = self:_sessionGet("telemetrySensor", nil)
+
+    if source and type(source.module) == "function" then
+        return source:module()
+    end
+
+    return self:_sessionGet("telemetryModuleNumber", 0) or 0
+end
+
+function Provider:_currentCrsfSensor()
+    if self.cachedCrsfSensor then
+        return self.cachedCrsfSensor
+    end
+
+    if crsf and crsf.getSensor ~= nil then
+        self.cachedCrsfSensor = crsf.getSensor()
+        return self.cachedCrsfSensor
+    end
+
+    return nil
+end
+
+function Provider:_popFrame(...)
+    local sensor = self:_currentCrsfSensor()
+
+    if sensor and sensor.popFrame then
+        return sensor:popFrame(...)
+    end
+    if crsf and crsf.popFrame then
+        return crsf.popFrame(...)
+    end
+
+    return nil
+end
+
+function Provider:_sidIsRelevant(sid)
+    if META_UID[sid] then
+        return true
+    end
+
+    if self.relevantSidSet == nil then
+        return self.strictUntilConfig ~= true
+    end
+
+    return self.relevantSidSet[sid] == true
+end
+
+function Provider:_resetPublishedSensors()
+    self.sensors = {}
+    self.lastValues = {}
+    self.lastTimes = {}
+end
+
+function Provider:_ensureTelemetrySensor(uid, name, unit, decimals, minValue, maxValue)
+    local sensor = self.sensors[uid]
+    local moduleNumber = self:_moduleNumber()
+
+    if sensor then
+        syncSensorMetadata(sensor, name, unit, decimals, minValue, maxValue, moduleNumber)
+        return sensor
+    end
+
+    sensor = system_getSource({category = CATEGORY_TELEMETRY_SENSOR, appId = uid})
+    if sensor then
+        syncSensorMetadata(sensor, name, unit, decimals, minValue, maxValue, moduleNumber)
+        self.sensors[uid] = sensor
+        return sensor
+    end
+
+    if self:_sessionGet("telemetryState", false) ~= true then
+        return nil
+    end
+
+    sensor = model_createSensor({type = SENSOR_TYPE_DIY})
+    sensor:appId(uid)
+    syncSensorMetadata(sensor, name, unit, decimals, minValue or -1000000000, maxValue or 2147483647, moduleNumber)
+    self.sensors[uid] = sensor
+    return sensor
+end
+
+function Provider:_publishSensorValue(uid, value, unit, decimals, name, minValue, maxValue)
+    local sensor
+    local now
+    local stale
+
+    if value == nil or self:_sessionGet("telemetryState", false) ~= true or not self:_sidIsRelevant(uid) then
         return
     end
 
-    local fullList = listFactory({
+    sensor = self:_ensureTelemetrySensor(uid, name, unit, decimals, minValue, maxValue)
+    if not sensor then
+        return
+    end
+
+    now = nowMs()
+    stale = (now - (self.lastTimes[uid] or 0)) >= REFRESH_INTERVAL_MS
+
+    if self.lastValues[uid] ~= value or stale then
+        if self.useRawValue and type(sensor.rawValue) == "function" then
+            sensor:rawValue(value)
+        else
+            sensor:value(value)
+        end
+        self.lastValues[uid] = value
+        self.lastTimes[uid] = now
+    end
+
+    if type(sensor.state) == "function" and sensor:state() == false then
+        self.sensors[uid] = nil
+        self.lastValues[uid] = nil
+        self.lastTimes[uid] = nil
+    end
+end
+
+function Provider:_refreshStaleSensors()
+    local now = nowMs()
+    local uid
+    local sensor
+    local value
+    local lastTime
+
+    for uid, sensor in pairs(self.sensors) do
+        value = self.lastValues[uid]
+        lastTime = self.lastTimes[uid]
+        if sensor and value ~= nil and lastTime and (now - lastTime) > REFRESH_INTERVAL_MS then
+            if self.useRawValue and type(sensor.rawValue) == "function" then
+                sensor:rawValue(value)
+            else
+                sensor:value(value)
+            end
+            self.lastTimes[uid] = now
+        end
+    end
+end
+
+function Provider:_rebuildRelevantSidSet()
+    local config = self:_sessionGet("telemetryConfig", nil)
+    local signature
+    local index
+    local slotId
+    local appIds
+    local sidIndex
+
+    if type(config) ~= "table" then
+        self.relevantSig = nil
+        self.relevantSidSet = nil
+        return
+    end
+
+    signature = telemetrySlotsSignature(config)
+    if self.relevantSig == signature and self.relevantSidSet ~= nil then
+        return
+    end
+
+    self.relevantSig = signature
+    self.relevantSidSet = {}
+
+    for index = 1, #config do
+        slotId = config[index]
+        appIds = sidLookup[slotId]
+        if appIds then
+            for sidIndex = 1, #appIds do
+                if appIds[sidIndex] then
+                    self.relevantSidSet[appIds[sidIndex]] = true
+                end
+            end
+        end
+    end
+end
+
+function Provider:_rebuildActiveSensorsList(force)
+    local signature = self.relevantSig or "__all__"
+    local fullList
+    local nextList
+    local sid
+    local sensor
+
+    if not force and self.activeSensorsListSig == signature and next(self.sensorsList) ~= nil then
+        return
+    end
+
+    fullList = sensorListFactory(self.decoderExports)
+    if type(fullList) ~= "table" then
+        utils.log("[elrs] Sensor list factory did not return a table", "error")
+        self.sensorsList = {}
+        self.activeSensorsListSig = signature
+        return
+    end
+
+    nextList = {}
+    for sid, sensor in pairs(fullList) do
+        if self:_sidIsRelevant(sid) then
+            nextList[sid] = sensor
+        else
+            nextList[sid] = {dec = sensor.dec}
+        end
+    end
+
+    self.sensorsList = nextList
+    self.activeSensorsListSig = signature
+end
+
+function Provider:_logDiag(kind, message, level)
+    local now = os_clock()
+    local last = self.lastDiagLogAt[kind] or 0
+
+    if now - last < (self.diagLogCooldownSeconds or DEFAULT_DIAG_LOG_COOLDOWN_SECONDS) then
+        return
+    end
+
+    self.lastDiagLogAt[kind] = now
+    utils.log(message, level or "debug")
+end
+
+function Provider:_muteSensorLost()
+    local telemetrySensor = self:_sessionGet("telemetrySensor", nil)
+    local module
+
+    if not telemetrySensor or type(telemetrySensor.module) ~= "function" then
+        return
+    end
+
+    module = model.getModule(telemetrySensor:module())
+    if module and module.muteSensorLost ~= nil then
+        module:muteSensorLost(5.0)
+    end
+end
+
+function Provider:_crossfirePop()
+    local command
+    local data
+    local fid
+    local sid
+    local ptr
+    local published
+    local publishOverflowed
+    local tnow
+
+    if self:_sessionGet("telemetryState", false) ~= true then
+        self:_muteSensorLost()
+        self:_resetPublishedSensors()
+        return false
+    end
+
+    command, data = self:_popFrame(CRSF_FRAME_CUSTOM_TELEM)
+    if not command or not data then
+        return false
+    end
+
+    self:_rebuildRelevantSidSet()
+    self:_rebuildActiveSensorsList()
+
+    ptr = 3
+    fid, ptr = decU8(data, ptr)
+    if self.haveFrameId then
+        local delta = (fid - self.telemetryFrameId) & 0xFF
+        if delta > 1 then
+            self.telemetryFrameSkip = self.telemetryFrameSkip + (delta - 1)
+        end
+    else
+        self.haveFrameId = true
+    end
+    self.telemetryFrameId = fid
+    self.telemetryFrameCount = self.telemetryFrameCount + 1
+
+    tnow = nowMs()
+    if self.lastFrameMs ~= nil then
+        self:_publishSensorValue(0xEE03, tnow - self.lastFrameMs, UNIT_MILLISECOND, 0, "@i18n(sensors.debug.frame_delta_ms)@", 0, 60000)
+    end
+    self.lastFrameMs = tnow
+
+    published = 0
+    publishOverflowed = false
+
+    while ptr < #data do
+        local sensor
+        local previousPtr
+        local ok
+        local value
+        local nextPtr
+
+        sid, ptr = decU16(data, ptr)
+        sensor = self.sensorsList[sid]
+        if not sensor then
+            self.parseBreakCount = self.parseBreakCount + 1
+            self:_logDiag("parse_break", string_format("[elrs] telemetry parse break: unknown sid=0x%04X", sid), "info")
+            break
+        end
+
+        previousPtr = ptr
+        ok, value, nextPtr = pcall(sensor.dec, data, ptr)
+        if not ok then
+            self.parseBreakCount = self.parseBreakCount + 1
+            self:_logDiag("parse_break", string_format("[elrs] telemetry parse break: sid=0x%04X decode error", sid), "info")
+            break
+        end
+
+        ptr = nextPtr or previousPtr
+        if ptr <= previousPtr then
+            self.parseBreakCount = self.parseBreakCount + 1
+            self:_logDiag("parse_break", string_format("[elrs] telemetry parse break: sid=0x%04X decoder made no progress", sid), "info")
+            break
+        end
+
+        if value ~= nil and sensor.name ~= nil then
+            if published < (self.publishBudgetPerFrame or DEFAULT_PUBLISH_BUDGET_PER_FRAME) then
+                self:_publishSensorValue(sid, value, sensor.unit, sensor.prec, sensor.name, sensor.min, sensor.max)
+                published = published + 1
+            elseif not publishOverflowed then
+                publishOverflowed = true
+                self.publishOverflowCount = self.publishOverflowCount + 1
+                self:_logDiag(
+                    "publish_overflow",
+                    string_format(
+                        "[elrs] telemetry publish overflow: frameId=%d sid=0x%04X budget=%d",
+                        self.telemetryFrameId,
+                        sid,
+                        self.publishBudgetPerFrame or DEFAULT_PUBLISH_BUDGET_PER_FRAME
+                    ),
+                    "info"
+                )
+            end
+        end
+    end
+
+    self:_publishSensorValue(0xEE01, self.telemetryFrameCount, UNIT_RAW, 0, "@i18n(sensors.debug.frame_count)@", 0, 2147483647)
+    self:_publishSensorValue(0xEE02, self.telemetryFrameSkip, UNIT_RAW, 0, "@i18n(sensors.debug.frame_skip)@", 0, 2147483647)
+
+    return true
+end
+
+function Provider:_buildDecoderExports()
+    return {
         decNil = decNil,
         decU8 = decU8,
         decS8 = decS8,
@@ -422,185 +561,154 @@ local function rebuildActiveSensorsList(force)
         decU32 = decU32,
         decS32 = decS32,
         decCellV = decCellV,
-        decCells = decCells,
-        decControl = decControl,
-        decAttitude = decAttitude,
-        decAccel = decAccel,
-        decLatLong = decLatLong,
-        decAdjFunc = decAdjFunc
-    })
+        decCells = function(data, pos)
+            return self:_decCells(data, pos)
+        end,
+        decControl = function(data, pos)
+            return self:_decControl(data, pos)
+        end,
+        decAttitude = function(data, pos)
+            return self:_decAttitude(data, pos)
+        end,
+        decAccel = function(data, pos)
+            return self:_decAccel(data, pos)
+        end,
+        decLatLong = function(data, pos)
+            return self:_decLatLong(data, pos)
+        end,
+        decAdjFunc = function(data, pos)
+            return self:_decAdjFunc(data, pos)
+        end
+    }
+end
 
-    if type(fullList) ~= "table" then
-        utils.log("[elrs] Sensor list factory did not return a table", "error")
-        sensorsList = {}
-        activeSensorsListSig = sig
+function Provider:_decCells(data, pos)
+    local count
+    local value
+    local voltage
+    local index
+
+    count, pos = decU8(data, pos)
+    self:_publishSensorValue(0x1020, count, UNIT_RAW, 0, "@i18n(sensors.power.cell_count)@", 0, 15)
+
+    for index = 1, count do
+        value, pos = decU8(data, pos)
+        value = value > 0 and value + 200 or 0
+        voltage = (count << 24) | ((index - 1) << 16) | value
+        self:_publishSensorValue(0x102F, voltage, UNIT_CELLS, 2, "@i18n(sensors.power.cell_voltages)@", 0, 455)
+    end
+
+    return nil, pos
+end
+
+function Provider:_decControl(data, pos)
+    local roll
+    local pitch
+    local yaw
+    local collective
+
+    pitch, roll, pos = decS12S12(data, pos)
+    yaw, collective, pos = decS12S12(data, pos)
+
+    self:_publishSensorValue(0x1031, pitch, UNIT_DEGREE, 2, "@i18n(sensors.control.pitch)@", -4500, 4500)
+    self:_publishSensorValue(0x1032, roll, UNIT_DEGREE, 2, "@i18n(sensors.control.roll)@", -4500, 4500)
+    self:_publishSensorValue(0x1033, 3 * yaw, UNIT_DEGREE, 2, "@i18n(sensors.control.yaw)@", -9000, 9000)
+    self:_publishSensorValue(0x1034, collective, UNIT_DEGREE, 2, "@i18n(sensors.control.collective)@", -4500, 4500)
+
+    return nil, pos
+end
+
+function Provider:_decAttitude(data, pos)
+    local pitch
+    local roll
+    local yaw
+
+    pitch, pos = decS16(data, pos)
+    roll, pos = decS16(data, pos)
+    yaw, pos = decS16(data, pos)
+
+    self:_publishSensorValue(0x1101, pitch, UNIT_DEGREE, 1, "@i18n(sensors.attitude.pitch)@", -1800, 3600)
+    self:_publishSensorValue(0x1102, roll, UNIT_DEGREE, 1, "@i18n(sensors.attitude.roll)@", -1800, 3600)
+    self:_publishSensorValue(0x1103, yaw, UNIT_DEGREE, 1, "@i18n(sensors.attitude.yaw)@", -1800, 3600)
+
+    return nil, pos
+end
+
+function Provider:_decAccel(data, pos)
+    local x
+    local y
+    local z
+
+    x, pos = decS16(data, pos)
+    y, pos = decS16(data, pos)
+    z, pos = decS16(data, pos)
+
+    self:_publishSensorValue(0x1111, x, UNIT_G, 2, "@i18n(sensors.accel.x)@", -4000, 4000)
+    self:_publishSensorValue(0x1112, y, UNIT_G, 2, "@i18n(sensors.accel.y)@", -4000, 4000)
+    self:_publishSensorValue(0x1113, z, UNIT_G, 2, "@i18n(sensors.accel.z)@", -4000, 4000)
+
+    return nil, pos
+end
+
+function Provider:_decLatLong(data, pos)
+    local latitude
+    local longitude
+
+    latitude, pos = decS32(data, pos)
+    longitude, pos = decS32(data, pos)
+
+    latitude = math_floor(latitude * 0.001)
+    longitude = math_floor(longitude * 0.001)
+
+    self:_publishSensorValue(0x1125, latitude, UNIT_DEGREE, 4, "@i18n(sensors.gps.latitude)@", -10000000000, 10000000000)
+    self:_publishSensorValue(0x112B, longitude, UNIT_DEGREE, 4, "@i18n(sensors.gps.longitude)@", -10000000000, 10000000000)
+
+    return nil, pos
+end
+
+function Provider:_decAdjFunc(data, pos)
+    local func
+    local value
+
+    func, pos = decU16(data, pos)
+    value, pos = decS32(data, pos)
+
+    self:_publishSensorValue(0x1221, func, UNIT_RAW, 0, "@i18n(sensors.control.adjustment_source)@", 0, 255)
+    self:_publishSensorValue(0x1222, value, UNIT_RAW, 0, "@i18n(sensors.control.adjustment_value)@")
+
+    return nil, pos
+end
+
+function Provider:wakeup()
+    local budget
+    local deadline
+    local popCount
+    local logEvery
+
+    if not self:_sessionGet("isConnected", false) then
         return
     end
 
-    local nextList = {}
-    for sid, sensor in pairs(fullList) do
-        if sidIsRelevant(sid) then
-            nextList[sid] = sensor
-        else
-            nextList[sid] = {dec = sensor.dec}
-        end
-    end
+    self:_rebuildRelevantSidSet()
 
-    sensorsList = nextList
-    activeSensorsListSig = sig
+    if self:_sessionGet("telemetryState", false) and self:_sessionGet("telemetrySensor", nil) then
+        budget = self.popBudgetSeconds or DEFAULT_POP_BUDGET_SECONDS
+        deadline = budget > 0 and (os_clock() + budget) or nil
+        popCount = 0
 
-    fullList = nil
-    collectgarbage("collect")
-end
-
-elrs.telemetryFrameId = 0
-elrs.telemetryFrameSkip = 0
-elrs.telemetryFrameCount = 0
-elrs._lastFrameMs = nil
-elrs._haveFrameId = false
-elrs.publishOverflowCount = 0
-elrs.wakeupBudgetBreakCount = 0
-elrs.parseBreakCount = 0
-elrs.diagLogCooldownSeconds = 2.0
-elrs.wakeupBudgetLogEvery = 25
-
-local lastDiagLogAt = {
-    publish_overflow = 0,
-    wakeup_budget = 0,
-    parse_break = 0
-}
-
-local function logDiag(kind, msg, level)
-    local now = os_clock()
-    local last = lastDiagLogAt[kind] or 0
-    if now - last < (elrs.diagLogCooldownSeconds or 2.0) then return end
-    lastDiagLogAt[kind] = now
-    utils.log(msg, level or "debug")
-end
-
-function elrs.crossfirePop()
-
-    if sessionGet("telemetryState", false) == false then
-        local ts = sessionGet("telemetrySensor", nil)
-        if ts then
-            local module = model.getModule(ts:module())
-            if module ~= nil and module.muteSensorLost ~= nil then module:muteSensorLost(5.0) end
-        end
-
-        resetSensors()
-
-        return false
-    else
-
-        local command, data = elrs.popFrame(CRSF_FRAME_CUSTOM_TELEM)
-        if command and data then
-
-            local fid, sid, val
-            local ptr = 3
-
-            rebuildRelevantSidSet()
-            rebuildActiveSensorsList()
-
-            fid, ptr = decU8(data, ptr)
-            if elrs._haveFrameId then
-                local delta = (fid - elrs.telemetryFrameId) & 0xFF
-                if delta > 1 then
-                    elrs.telemetryFrameSkip = elrs.telemetryFrameSkip + (delta - 1)
-                end
-            else
-                -- First frame after (re)connect: establish baseline, don’t count skips.
-                elrs._haveFrameId = true
-            end
-            elrs.telemetryFrameId = fid
-            elrs.telemetryFrameCount = elrs.telemetryFrameCount + 1
-
-            -- Frame timing (ms between received custom telemetry frames)
-            local tnow = nowMs()
-            if elrs._lastFrameMs ~= nil then
-                local dt = tnow - elrs._lastFrameMs
-                setTelemetryValue(0xEE03, 0, 0, dt, UNIT_MILLISECOND, 0, "@i18n(sensors.debug.frame_delta_ms)@", 0, 60000)
-            end
-            elrs._lastFrameMs = tnow
-
-            local published = 0
-            local publishOverflowed = false
-            while ptr < #data do
-
-                sid, ptr = decU16(data, ptr)
-                local sensor = sensorsList[sid]
-                if sensor then
-
-                    local prev = ptr
-                    local ok, v, np = pcall(sensor.dec, data, ptr)
-                    if not ok then
-                        elrs.parseBreakCount = elrs.parseBreakCount + 1
-                        logDiag("parse_break", string_format("[elrs] telemetry parse break: sid=0x%04X decode error", sid), "info")
-                        break
-                    end
-                    ptr = np or prev
-                    if ptr <= prev then
-                        elrs.parseBreakCount = elrs.parseBreakCount + 1
-                        logDiag("parse_break", string_format("[elrs] telemetry parse break: sid=0x%04X decoder made no progress", sid), "info")
-                        break
-                    end
-
-                    if v ~= nil and sensor.name ~= nil then
-                        if published < (elrs.publishBudgetPerFrame or 40) then
-                            setTelemetryValue(sid, 0, 0, v, sensor.unit, sensor.prec, sensor.name, sensor.min, sensor.max)
-                            published = published + 1
-                        elseif not publishOverflowed then
-                            publishOverflowed = true
-                            elrs.publishOverflowCount = elrs.publishOverflowCount + 1
-                            logDiag("publish_overflow", string_format("[elrs] telemetry publish overflow: frameId=%d sid=0x%04X budget=%d", elrs.telemetryFrameId, sid, elrs.publishBudgetPerFrame or 40), "info")
-                        end
-                    end
-                else
-                    elrs.parseBreakCount = elrs.parseBreakCount + 1
-                    logDiag("parse_break", string_format("[elrs] telemetry parse break: unknown sid=0x%04X", sid), "info")
-                    break
-                end
-            end
-
-            setTelemetryValue(0xEE01, 0, 0, elrs.telemetryFrameCount, UNIT_RAW, 0, "@i18n(sensors.debug.frame_count)@", 0, 2147483647)
-            setTelemetryValue(0xEE02, 0, 0, elrs.telemetryFrameSkip, UNIT_RAW, 0, "@i18n(sensors.debug.frame_skip)@", 0, 2147483647)
-
-            --[[
-            These are for debug only, not intended to be added as official telemetry sensors
-             setTelemetryValue(0xEE04, 0, 0, elrs.publishOverflowCount, UNIT_RAW, 0, "Publish Overflow", 0, 2147483647)
-             setTelemetryValue(0xEE05, 0, 0, elrs.wakeupBudgetBreakCount, UNIT_RAW, 0, "Wakeup Break", 0, 2147483647)
-             setTelemetryValue(0xEE06, 0, 0, elrs.parseBreakCount, UNIT_RAW, 0, "Parse Break", 0, 2147483647)
-            ]]--
-
-            return true
-        end
-
-        return false
-    end
-end
-
-function elrs.wakeup()
-
-    if not sessionGet("isConnected", false) then return end
-
-    rebuildRelevantSidSet()
-
-    if sessionGet("telemetryState", false) and sessionGet("telemetrySensor", nil) then
-        local budget = (elrs.popBudgetSeconds or (config and config.elrsPopBudgetSeconds) or 0.2)
-        local deadline = (budget and budget > 0) and (os_clock() + budget) or nil
-        local pops = 0
-        while elrs.crossfirePop() do
-            pops = pops + 1
+        while self:_crossfirePop() do
+            popCount = popCount + 1
             if deadline and os_clock() >= deadline then
-                elrs.wakeupBudgetBreakCount = elrs.wakeupBudgetBreakCount + 1
-                local logEvery = tonumber(elrs.wakeupBudgetLogEvery) or 25
-                if elrs.wakeupBudgetBreakCount == 1 or (logEvery > 0 and (elrs.wakeupBudgetBreakCount % logEvery) == 0) then
-                    logDiag(
+                self.wakeupBudgetBreakCount = self.wakeupBudgetBreakCount + 1
+                logEvery = tonumber(self.wakeupBudgetLogEvery) or DEFAULT_WAKEUP_BUDGET_LOG_EVERY
+                if self.wakeupBudgetBreakCount == 1 or (logEvery > 0 and (self.wakeupBudgetBreakCount % logEvery) == 0) then
+                    self:_logDiag(
                         "wakeup_budget",
                         string_format(
                             "[elrs] wakeup budget break: budget=%.3fs frames=%d count=%d",
                             budget,
-                            pops,
-                            elrs.wakeupBudgetBreakCount
+                            popCount,
+                            self.wakeupBudgetBreakCount
                         ),
                         "info"
                     )
@@ -608,35 +716,41 @@ function elrs.wakeup()
                 break
             end
         end
-        setTelemetryValue(0xEE05, 0, 0, elrs.wakeupBudgetBreakCount, UNIT_RAW, 0, "@i18n(sensors.debug.wakeup_break)@", 0, 2147483647)
-        refreshStaleSensors()
+
+        self:_publishSensorValue(0xEE05, self.wakeupBudgetBreakCount, UNIT_RAW, 0, "@i18n(sensors.debug.wakeup_break)@", 0, 2147483647)
+        self:_refreshStaleSensors()
     else
-        resetSensors()
+        self:_resetPublishedSensors()
     end
 end
 
-function elrs.reset()
+function Provider:reset()
+    local uid
+    local sensor
 
-    for i, v in pairs(sensors['uid']) do
-        if v then
-            v:reset()
+    for uid, sensor in pairs(self.sensors) do
+        if sensor then
+            sensor:reset()
         end
     end
 
-    resetSensors()
-    cachedCrsfSensor = nil
-    elrs._relevantSidSet = nil
-    elrs._relevantSig = nil
-    sensorsList = {}
-    activeSensorsListSig = nil
-    elrs.telemetryFrameId = 0
-    elrs.telemetryFrameSkip = 0
-    elrs.telemetryFrameCount = 0
-    elrs._lastFrameMs = nil
-    elrs._haveFrameId = false
-    elrs.publishOverflowCount = 0
-    elrs.wakeupBudgetBreakCount = 0
-    elrs.parseBreakCount = 0
+    self:_resetPublishedSensors()
+    self.cachedCrsfSensor = nil
+    self.relevantSig = nil
+    self.relevantSidSet = nil
+    self.sensorsList = {}
+    self.activeSensorsListSig = nil
+    self.telemetryFrameId = 0
+    self.telemetryFrameSkip = 0
+    self.telemetryFrameCount = 0
+    self.lastFrameMs = nil
+    self.haveFrameId = false
+    self.publishOverflowCount = 0
+    self.wakeupBudgetBreakCount = 0
+    self.parseBreakCount = 0
+    self.lastDiagLogAt.publish_overflow = 0
+    self.lastDiagLogAt.wakeup_budget = 0
+    self.lastDiagLogAt.parse_break = 0
 end
 
-return elrs
+return Provider

@@ -8,7 +8,7 @@ local utils = require("lib.utils")
 local Provider = {}
 Provider.__index = Provider
 
-local FORCE_REFRESH_INTERVAL = 2.5
+local FORCE_REFRESH_INTERVAL = 1.0
 
 local API_ORDER = {
     "DATAFLASH_SUMMARY",
@@ -19,7 +19,7 @@ local API_ORDER = {
 local API_DEFS = {
     DATAFLASH_SUMMARY = {
         intervalArmed = -1,
-        intervalDisarmed = 20,
+        intervalDisarmed = 10,
         onConnect = true,
         onDisarm = true,
         fields = {

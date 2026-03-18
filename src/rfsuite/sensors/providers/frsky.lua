@@ -10,7 +10,6 @@ local utils = require("lib.utils")
 local Provider = {}
 Provider.__index = Provider
 
-local CACHE_EXPIRE_SECONDS = 30
 local TELEMETRY_PHYS_ID = 27
 
 local function moduleNumberForSession(session)
@@ -53,17 +52,15 @@ function Provider.new(framework)
         framework = framework,
         createSensorCache = {},
         renameSensorCache = {},
-        dropSensorCache = {},
         provisionedSignature = nil,
-        lastCacheFlushAt = os.clock(),
-        unsupportedLogged = false
+        unsupportedLogged = false,
+        wasDiscoverActive = false
     }, Provider)
 end
 
 function Provider:_clearCaches()
     self.createSensorCache = {}
     self.renameSensorCache = {}
-    self.dropSensorCache = {}
 end
 
 function Provider:_ensureCreatedSensor(appId, meta)
@@ -171,7 +168,7 @@ end
 
 function Provider:wakeup()
     local session = self.framework.session
-    local now = os.clock()
+    local discoverActive = system.isSensorDiscoverActive and system.isSensorDiscoverActive() == true
 
     if not session:get("isConnected", false) then
         return
@@ -189,14 +186,20 @@ function Provider:wakeup()
         return
     end
     self.unsupportedLogged = false
-    if system.isSensorDiscoverActive and system.isSensorDiscoverActive() then
+
+    if discoverActive then
+        if not self.wasDiscoverActive then
+            self:_clearCaches()
+            self.provisionedSignature = nil
+        end
+        self.wasDiscoverActive = true
         return
     end
 
-    if (now - (self.lastCacheFlushAt or 0)) >= CACHE_EXPIRE_SECONDS then
+    if self.wasDiscoverActive then
         self:_clearCaches()
         self.provisionedSignature = nil
-        self.lastCacheFlushAt = now
+        self.wasDiscoverActive = false
     end
 
     self:_provisionFromConfig()
@@ -205,8 +208,8 @@ end
 function Provider:reset()
     self:_clearCaches()
     self.provisionedSignature = nil
-    self.lastCacheFlushAt = os.clock()
     self.unsupportedLogged = false
+    self.wasDiscoverActive = false
 end
 
 return Provider
