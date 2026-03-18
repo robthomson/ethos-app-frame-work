@@ -9970,6 +9970,26 @@
         "translation": "Vertical Speed"
       }
     },
+    "blackbox": {
+      "flags": {
+        "english": "BBL Flags",
+        "max_length": 9,
+        "needs_translation": false,
+        "translation": "BBL Flags"
+      },
+      "size": {
+        "english": "BBL Size",
+        "max_length": 8,
+        "needs_translation": false,
+        "translation": "BBL Size"
+      },
+      "used": {
+        "english": "BBL Used",
+        "max_length": 8,
+        "needs_translation": false,
+        "translation": "BBL Used"
+      }
+    },
     "control": {
       "summary": {
         "english": "Control",
@@ -10512,6 +10532,12 @@
         "max_length": 14,
         "needs_translation": false,
         "translation": "Governor State"
+      },
+      "governor_mode": {
+        "english": "Governor Mode",
+        "max_length": 13,
+        "needs_translation": false,
+        "translation": "Governor Mode"
       },
       "pid_profile": {
         "english": "PID Profile",
