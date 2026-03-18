@@ -102,7 +102,7 @@ function framework:init(config)
     
     -- Initialize preferences file path
     self.config.baseDir = self.config.baseDir or "ethos_framework"
-    self.config.prefFile = self.config.prefFile or (self.config.baseDir .. "/preferences.ini")
+    self.config.prefFile = self.config.prefFile or (((self.config.preferences or self.config.baseDir)) .. "/preferences.ini")
     
     self.preferences = preferences_mod.new({
         path = self.config.prefFile,

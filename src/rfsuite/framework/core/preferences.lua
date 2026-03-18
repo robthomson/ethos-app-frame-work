@@ -38,6 +38,33 @@ local function normalizePath(path)
     return "SCRIPTS:/" .. path
 end
 
+local function ensureDirectory(path)
+    local current = ""
+    local rest = path or ""
+    local prefix
+
+    if not path or path == "" or not (os and os.mkdir) then
+        return
+    end
+
+    if rest:match("^%a+:/") then
+        prefix, rest = rest:match("^(%a+:)/(.*)$")
+        current = tostring(prefix) .. "/"
+    elseif rest:sub(1, 1) == "/" then
+        current = "/"
+        rest = rest:sub(2)
+    end
+
+    for part in rest:gmatch("[^/]+") do
+        if current == "" or current == "/" then
+            current = current .. part
+        else
+            current = current .. "/" .. part
+        end
+        pcall(os.mkdir, current)
+    end
+end
+
 function methods:reset(defaults)
     self._defaults = copyTable(defaults or self._defaults or {})
     self._data = copyTable(self._defaults)
@@ -59,11 +86,14 @@ end
 
 function methods:save(path)
     local target = normalizePath(path or self._path)
+    local parentDir
 
     if not target then
         return false, "preferences_path_missing"
     end
 
+    parentDir = target:match("^(.*)/[^/]+$")
+    ensureDirectory(parentDir)
     self._path = target
     return ini.save_ini_file(target, self._data)
 end

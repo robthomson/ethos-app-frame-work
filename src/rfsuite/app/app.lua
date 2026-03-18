@@ -11,6 +11,10 @@ local NOOP_PAINT = function() end
 local HEADER_NAV_HEIGHT_REDUCTION = 4
 local HEADER_NAV_Y_SHIFT = 6
 local HEADER_BREADCRUMB_Y_OFFSET = 5
+local HEADER_RIGHT_GUTTER = 12
+local DIRTY_WRAPPERS_INSTALLED = false
+local DIRTY_OWNER = nil
+local unpack_fn = table.unpack or unpack
 
 local function loadLuaTable(path)
     if type(path) ~= "string" or path == "" then
@@ -131,6 +135,8 @@ function App:init(framework)
     self.navFields = {}
     self.maskCache = {}
     self.maskCacheOrder = {}
+    self.pageDirty = false
+    self:_installDirtyCallbackWrappers()
 end
 
 function App:_clearFormRefs()
@@ -149,6 +155,40 @@ end
 
 function App:_menuState()
     return self.framework.preferences:section("menu_state", {})
+end
+
+function App:_generalPrefs()
+    local general = self.framework.preferences:section("general", {})
+    local preview = self.currentNode and self.currentNode.getGeneralPreferences and self.currentNode:getGeneralPreferences()
+    local merged = {}
+    local key
+
+    for key, value in pairs(general) do
+        merged[key] = value
+    end
+    if type(preview) == "table" then
+        for key, value in pairs(preview) do
+            merged[key] = value
+        end
+    end
+
+    return merged
+end
+
+function App:_generalBool(key, default)
+    local value = self:_generalPrefs()[key]
+
+    if value == nil then
+        return default
+    end
+    if value == true or value == "true" or value == 1 or value == "1" then
+        return true
+    end
+    if value == false or value == "false" or value == 0 or value == "0" then
+        return false
+    end
+
+    return default
 end
 
 function App:_getSelectedIndex(source)
@@ -173,7 +213,7 @@ function App:_windowSize()
 end
 
 function App:_iconsize()
-    local general = self.framework.preferences:section("general", {})
+    local general = self:_generalPrefs()
     local iconsize = tonumber(general.iconsize)
     if iconsize == nil then
         iconsize = 1
@@ -182,6 +222,22 @@ function App:_iconsize()
     if iconsize < 0 then iconsize = 0 end
     if iconsize > 2 then iconsize = 2 end
     return iconsize
+end
+
+function App:_collapseNavigation()
+    return self:_generalBool("collapse_unused_menu_entries", false)
+end
+
+function App:_confirmBeforeSave()
+    return self:_generalBool("save_confirm", false)
+end
+
+function App:_confirmBeforeReload()
+    return self:_generalBool("reload_confirm", false)
+end
+
+function App:_saveDirtyOnly()
+    return self:_generalBool("save_dirty_only", true)
 end
 
 function App:_menuButtonMetrics()
@@ -231,7 +287,7 @@ function App:_headerMetrics()
         buttonW = buttonW,
         compactW = compactW,
         buttonH = buttonH,
-        titleWidth = math.max(40, (width - 5) - reserved - 8)
+        titleWidth = math.max(40, (width - HEADER_RIGHT_GUTTER) - reserved - 8)
     }
 end
 
@@ -258,6 +314,214 @@ function App:_loadMask(path)
     end
 
     return mask
+end
+
+function App:_reportNodeError(context, err)
+    if self.framework and self.framework.log and self.framework.log.error then
+        self.framework.log:error("App %s error: %s", tostring(context), tostring(err))
+    end
+end
+
+function App:_installDirtyCallbackWrappers()
+    local function wrapSetter(methodName)
+        local original = form and form[methodName]
+
+        if type(original) ~= "function" then
+            return
+        end
+
+        form[methodName] = function(...)
+            local argc = select("#", ...)
+            local args = {...}
+            local setterIdx
+            local setter
+
+            for setterIdx = argc, 1, -1 do
+                if type(args[setterIdx]) == "function" then
+                    setter = args[setterIdx]
+                    args[setterIdx] = function(...)
+                        if DIRTY_OWNER and DIRTY_OWNER.markPageDirty then
+                            DIRTY_OWNER:markPageDirty()
+                        end
+                        return setter(...)
+                    end
+                    break
+                end
+            end
+
+            return original(unpack_fn(args, 1, argc))
+        end
+    end
+
+    if DIRTY_WRAPPERS_INSTALLED or not form then
+        return
+    end
+
+    wrapSetter("addBooleanField")
+    wrapSetter("addChoiceField")
+    wrapSetter("addNumberField")
+    wrapSetter("addTextField")
+    wrapSetter("addSourceField")
+    wrapSetter("addSensorField")
+    wrapSetter("addColorField")
+    wrapSetter("addSwitchField")
+
+    DIRTY_WRAPPERS_INSTALLED = true
+end
+
+function App:_shouldManageDirtySave(node)
+    if type(node) ~= "table" then
+        return false
+    end
+    if type(node.save) ~= "function" then
+        return false
+    end
+    if node.disableSaveUntilDirty == false then
+        return false
+    end
+    if self:_saveDirtyOnly() ~= true then
+        return false
+    end
+    return true
+end
+
+function App:_canSaveNode(node)
+    local ok
+    local value
+
+    if type(node) ~= "table" or type(node.save) ~= "function" then
+        return false
+    end
+
+    if type(node.canSave) == "function" then
+        ok, value = pcall(node.canSave, node, self)
+        if ok then
+            return value == true
+        end
+        self:_reportNodeError("canSave", value)
+        return false
+    end
+
+    if self:_shouldManageDirtySave(node) then
+        return self.pageDirty == true
+    end
+
+    return true
+end
+
+function App:_syncSaveButtonState()
+    local save = self.navFields and self.navFields.save
+
+    if save and save.enable then
+        save:enable(self:_canSaveNode(self.currentNode))
+    end
+end
+
+function App:setPageDirty(isDirty)
+    self.pageDirty = isDirty == true
+    self:_syncSaveButtonState()
+end
+
+function App:markPageDirty()
+    if self.pageDirty then
+        return
+    end
+    self:setPageDirty(true)
+end
+
+function App:_confirmAction(title, message, action)
+    if not (form and form.openDialog) then
+        return action()
+    end
+
+    form.openDialog({
+        width = nil,
+        title = title,
+        message = message,
+        buttons = {
+            {
+                label = "OK",
+                action = function()
+                    return action()
+                end
+            },
+            {
+                label = "Cancel",
+                action = function()
+                    return true
+                end
+            }
+        },
+        wakeup = function() end,
+        paint = function() end,
+        options = TEXT_LEFT
+    })
+    return true
+end
+
+function App:_handleSaveAction()
+    local result
+
+    if not self:_canSaveNode(self.currentNode) then
+        return false
+    end
+
+    local function runSave()
+        result = self:_runNodeHook(self.currentNode, "save")
+        if result == false then
+            return false
+        end
+        self:setPageDirty(false)
+        return true
+    end
+
+    if self:_confirmBeforeSave() == true then
+        return self:_confirmAction("Save Settings", "Save changes?", runSave)
+    end
+
+    return runSave()
+end
+
+function App:_handleReloadAction()
+    local result
+
+    local function runReload()
+        result = self:_runNodeHook(self.currentNode, "reload")
+        if result == false then
+            return false
+        end
+        self:setPageDirty(false)
+        return true
+    end
+
+    if self:_confirmBeforeReload() == true then
+        return self:_confirmAction("Reload Settings", "Discard changes and reload?", runReload)
+    end
+
+    return runReload()
+end
+
+function App:_runNodeHook(node, hookName, ...)
+    local hook
+    local ok
+    local result
+
+    if type(node) ~= "table" then
+        return nil, false
+    end
+
+    hook = node[hookName]
+    if type(hook) ~= "function" then
+        return nil, false
+    end
+
+    ok, result = pcall(hook, node, self, ...)
+    if not ok then
+        self:_reportNodeError(hookName, result)
+        return nil, true
+    end
+
+    return result, true
 end
 
 function App:_headerNavY()
@@ -475,7 +739,13 @@ function App:_loadRootNode()
     return node
 end
 
+function App:_closeNode(node)
+    self:_runNodeHook(node, "close")
+end
+
 function App:_openRoot()
+    self:_closeNode(self.currentNode)
+    self:setPageDirty(false)
     self.pathStack = {}
     self.currentNodeSource = MENU_ROOT_PATH
     self.currentNode = self:_loadRootNode()
@@ -496,6 +766,78 @@ function App:_makeLeafNode(item, breadcrumb)
     }
 end
 
+function App:_makeLoadErrorNode(item, breadcrumb, err)
+    local title = (type(item) == "table" and item.title) or "Load Error"
+    return {
+        title = title,
+        subtitle = tostring(err),
+        breadcrumb = breadcrumb,
+        navButtons = {menu = true, save = false, reload = false, tool = false, help = false},
+        items = {
+            {id = "status", title = "Status", kind = "static", value = "Load Error"},
+            {id = "path", title = "Path", kind = "static", value = (type(item) == "table" and item.path) or "n/a"},
+            {id = "error", title = "Error", kind = "static", value = tostring(err)}
+        }
+    }
+end
+
+function App:_loadPageNode(item, breadcrumb)
+    local modulePath
+    local pageModule
+    local loadErr
+    local ok
+    local node
+
+    if type(item) ~= "table" or type(item.path) ~= "string" or item.path == "" then
+        return self:_makeLeafNode(item or {}, breadcrumb)
+    end
+
+    modulePath = "app/modules/" .. item.path
+    pageModule, loadErr = loadLuaTable(modulePath)
+    if type(pageModule) ~= "table" then
+        return self:_makeLoadErrorNode(item, breadcrumb, loadErr)
+    end
+
+    if type(pageModule.open) ~= "function" then
+        return self:_makeLeafNode(item, breadcrumb)
+    end
+
+    ok, node = pcall(pageModule.open, pageModule, {
+        app = self,
+        framework = self.framework,
+        item = item,
+        breadcrumb = breadcrumb,
+        source = modulePath
+    })
+    if not ok then
+        return self:_makeLoadErrorNode(item, breadcrumb, node)
+    end
+
+    if type(node) ~= "table" then
+        return self:_makeLoadErrorNode(item, breadcrumb, "page open did not return table")
+    end
+
+    if type(node.title) ~= "string" or node.title == "" then
+        node.title = item.title or item.id or "Page"
+    end
+    if type(node.subtitle) ~= "string" or node.subtitle == "" then
+        node.subtitle = item.subtitle or "Page"
+    end
+    if type(node.breadcrumb) ~= "string" or node.breadcrumb == "" then
+        node.breadcrumb = breadcrumb
+    end
+    if type(node.navButtons) ~= "table" then
+        node.navButtons = {menu = true, save = false, reload = false, tool = false, help = false}
+    end
+    if self:_shouldManageDirtySave(node) and type(node.canSave) ~= "function" then
+        node.canSave = function()
+            return self.pageDirty == true
+        end
+    end
+
+    return node
+end
+
 function App:_enterItem(index, item)
     if type(item) ~= "table" then
         return
@@ -513,11 +855,15 @@ function App:_enterItem(index, item)
         self.currentNodeSource = item.source
         self.currentNode = self:_loadNodeFromSource(item.source)
         self.currentNode.breadcrumb = breadcrumb
+    elseif item.kind == "page" then
+        self.currentNodeSource = "page:" .. tostring(item.path or item.id or index)
+        self.currentNode = self:_loadPageNode(item, breadcrumb)
     else
         self.currentNodeSource = "leaf:" .. tostring(item.id or index)
         self.currentNode = self:_makeLeafNode(item, breadcrumb)
     end
 
+    self:setPageDirty(false)
     self:_invalidateForm()
 end
 
@@ -527,9 +873,11 @@ function App:_goBack()
         return false
     end
 
+    self:_closeNode(self.currentNode)
     self.pathStack[#self.pathStack] = nil
     self.currentNodeSource = previous.source
     self.currentNode = previous.node
+    self:setPageDirty(false)
     self:_invalidateForm()
     return true
 end
@@ -575,15 +923,16 @@ end
 function App:_addNavigationButtons()
     local metrics = self:_headerMetrics()
     local y = self:_headerNavY()
-    local xRight = metrics.width - 5
+    local xRight = metrics.width - HEADER_RIGHT_GUTTER
     local atRoot = (#self.pathStack == 0)
     local navConfig = self:_navButtonsForNode(self.currentNode)
+    local renderDefs = {}
     local defs = {
         {
             key = "menu",
             text = "Menu",
             compact = false,
-            enabled = navConfig.menu == true,
+            visible = navConfig.menu == true,
             press = function()
                 if atRoot then
                     self:_requestExit()
@@ -596,34 +945,52 @@ function App:_addNavigationButtons()
             key = "save",
             text = "Save",
             compact = false,
-            enabled = navConfig.save == true,
-            press = function() end
+            visible = navConfig.save == true,
+            press = function()
+                self:_handleSaveAction()
+            end
         },
         {
             key = "reload",
             text = "Reload",
             compact = false,
-            enabled = navConfig.reload == true,
-            press = function() end
+            visible = navConfig.reload == true,
+            press = function()
+                self:_handleReloadAction()
+            end
         },
         {
             key = "tool",
             text = "*",
             compact = true,
-            enabled = navConfig.tool == true,
-            press = function() end
+            visible = navConfig.tool == true,
+            press = function()
+                self:_runNodeHook(self.currentNode, "tool")
+            end
         },
         {
             key = "help",
             text = "Help",
             compact = false,
-            enabled = navConfig.help == true,
-            press = function() end
+            visible = navConfig.help == true,
+            press = function()
+                self:_runNodeHook(self.currentNode, "help")
+            end
         }
     }
 
-    for i = #defs, 1, -1 do
-        local def = defs[i]
+    if self:_collapseNavigation() == true then
+        for i = 1, #defs do
+            if defs[i].visible == true then
+                renderDefs[#renderDefs + 1] = defs[i]
+            end
+        end
+    else
+        renderDefs = defs
+    end
+
+    for i = #renderDefs, 1, -1 do
+        local def = renderDefs[i]
         local bx
         local field
         local width = def.compact == true and metrics.compactW or metrics.buttonW
@@ -636,7 +1003,11 @@ function App:_addNavigationButtons()
             press = def.press
         })
         if field and field.enable then
-            field:enable(def.enabled == true)
+            if def.key == "save" then
+                field:enable(self:_canSaveNode(self.currentNode))
+            else
+                field:enable(def.visible == true)
+            end
         end
         self.navFields[def.key] = field
         xRight = bx - 5
@@ -702,25 +1073,27 @@ function App:_buildGridButtons(items)
 
             local bx = (metrics.buttonW + metrics.padding) * lc
             local icon = nil
+            local selectedIndex = buttonIndex
+            local selectedItem = item
             if iconsize ~= 0 and item.image then
                 icon = self:_loadMask(item.image)
             end
 
             local field = form.addButton(nil, {x = bx, y = y, w = metrics.buttonW, h = metrics.buttonH}, {
-                text = item.title or item.id or ("Item " .. tostring(buttonIndex)),
+                text = selectedItem.title or selectedItem.id or ("Item " .. tostring(selectedIndex)),
                 icon = icon,
                 options = FONT_S,
                 paint = NOOP_PAINT,
                 press = function()
-                    self:_enterItem(buttonIndex, item)
+                    self:_enterItem(selectedIndex, selectedItem)
                 end
             })
 
-            self.buttonFields[buttonIndex] = field
+            self.buttonFields[selectedIndex] = field
             if field and field.enable then
-                field:enable(item.disabled ~= true)
+                field:enable(selectedItem.disabled ~= true)
             end
-            if buttonIndex == prefsIndex and field and field.focus then
+            if selectedIndex == prefsIndex and field and field.focus then
                 field:focus()
             end
 
@@ -738,12 +1111,24 @@ end
 
 function App:_buildNodeForm()
     local node = self.currentNode or self:_loadRootNode()
+    local built
+    local hasCustomBuilder
 
     safeFormClear()
     self:_clearFormRefs()
 
     self:_addHeader(node)
+    built, hasCustomBuilder = self:_runNodeHook(node, "buildForm")
+    if hasCustomBuilder then
+        if built == false then
+            self:_addStaticLine("Error", "Page builder failed")
+        end
+        self:_syncSaveButtonState()
+        return
+    end
+
     self:_buildGridButtons(node.items or {})
+    self:_syncSaveButtonState()
 end
 
 function App:_rebuildFormIfNeeded()
@@ -768,10 +1153,13 @@ function App:wakeup()
         self.currentNode = self:_loadRootNode()
     end
     self:_rebuildFormIfNeeded()
+    self:_runNodeHook(self.currentNode, "wakeup")
     self:_updateValueFields()
 end
 
 function App:paint()
+    self:_runNodeHook(self.currentNode, "paint")
+
     local breadcrumb = self:_breadcrumbText()
     local width
 
@@ -801,14 +1189,22 @@ function App:event(category, value, x, y)
         end
         return self:_requestExit()
     end
+    if self:_runNodeHook(self.currentNode, "event", category, value, x, y) == true then
+        return true
+    end
     return false
 end
 
 function App:onActivate()
+    DIRTY_OWNER = self
     self:_openRoot()
 end
 
 function App:onDeactivate()
+    if DIRTY_OWNER == self then
+        DIRTY_OWNER = nil
+    end
+    self:_closeNode(self.currentNode)
     safeFormClear()
     self:_clearFormRefs()
     self.currentNode = nil
@@ -816,6 +1212,10 @@ function App:onDeactivate()
 end
 
 function App:close()
+    if DIRTY_OWNER == self then
+        DIRTY_OWNER = nil
+    end
+    self:_closeNode(self.currentNode)
     safeFormClear()
     self:_clearFormRefs()
     self.currentNode = nil
