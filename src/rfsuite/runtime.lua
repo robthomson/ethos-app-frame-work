@@ -81,6 +81,10 @@ runtime.config = {
         connectWatchdogTimeout = 10.0,
         connectWatchdogCooldown = 3.0
     },
+    taskScheduler = {
+        maxLoopMs = 8,
+        maxNormalTasksPerWakeup = 2
+    },
     mspProtocolVersion = 1,
     bgTaskName = "Rotorflight [Background]",
     bgTaskKey = "rf2bg",
@@ -208,12 +212,14 @@ function runtime.ensureFramework()
     framework:registerTask("msp", MSPTask, {
         priority = 25,
         interval = 0.05,
+        critical = true,
         enabled = true
     })
 
     framework:registerTask("lifecycle", LifecycleTask, {
         priority = 20,
         interval = 0.05,
+        critical = true,
         enabled = true
     })
 

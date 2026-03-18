@@ -71,6 +71,11 @@ framework._renderCallbackWakeupOptions = {
     budgetMs = 8,
     category = "render"
 }
+framework._taskSchedulerOptions = {
+    maxLoopMs = 8,
+    maxNormalTasksPerWakeup = 2
+}
+framework._taskRoundRobinCursor = 1
 
 function framework:_defaultPreferences()
     return {
@@ -108,6 +113,11 @@ function framework:init(config)
     })
     self._profiler = self.profiler.new(self.config.developer or {})
     self._idleGcLastAt = 0
+    self._taskSchedulerOptions = {
+        maxLoopMs = ((self.config.taskScheduler or {}).maxLoopMs) or 8,
+        maxNormalTasksPerWakeup = ((self.config.taskScheduler or {}).maxNormalTasksPerWakeup) or 2
+    }
+    self._taskRoundRobinCursor = 1
     
     -- Initialize session state
     self.session:set("initialized", true)
@@ -267,6 +277,7 @@ function framework:registerTask(name, taskClass, options)
         priority = options.priority or 10,
         interval = options.interval or 0.1,
         lastWakeup = 0,
+        critical = options.critical == true,
         enabled = options.enabled ~= false,
         instance = nil
     }
@@ -320,6 +331,7 @@ function framework:listTasks()
         table.insert(result, {
             name = name,
             priority = meta.priority,
+            critical = meta.critical == true,
             enabled = meta.enabled,
             initialized = meta.instance ~= nil
         })
@@ -361,30 +373,86 @@ end
 
 --[[ MAIN LOOP COORDINATION ]]
 
+function framework:_taskIsDue(meta, now)
+    return meta
+        and meta.enabled
+        and meta.instance
+        and (now - (meta.lastWakeup or 0)) >= (meta.interval or 0)
+end
+
+function framework:_runTask(name, meta, now)
+    local startedAt = os.clock()
+    local ok
+    local err
+    local duration
+
+    ok, err = pcall(meta.instance.wakeup, meta.instance)
+    duration = os.clock() - startedAt
+
+    if self._profiler then
+        self.profiler:recordTask(self._profiler, name, meta.interval, duration)
+    end
+
+    if not ok then
+        self.log:error("Task '%s' wakeup error: %s", name, tostring(err))
+    end
+
+    meta.lastWakeup = now
+    return duration
+end
+
 function framework:_wakeupTasks()
     if not self._initialized then
         return
     end
 
     local now = os.clock()
+    local scheduler = self._taskSchedulerOptions or {}
+    local deadline = (tonumber(scheduler.maxLoopMs) or 0) > 0 and (now + ((tonumber(scheduler.maxLoopMs) or 0) / 1000.0)) or nil
+    local maxNormalTasks = tonumber(scheduler.maxNormalTasksPerWakeup) or 0
+    local normalRan = 0
+    local totalTasks = #self._taskOrder
+    local checked = 0
+    local index
+    local taskInfo
+    local meta
 
     for _, taskInfo in ipairs(self._taskOrder) do
         local meta = self._taskMetadata[taskInfo.name]
-        if meta.enabled and meta.instance then
-            if (now - meta.lastWakeup) >= meta.interval then
-                local startedAt = os.clock()
-                local ok, err = pcall(meta.instance.wakeup, meta.instance)
-                local duration = os.clock() - startedAt
-                if self._profiler then
-                    self.profiler:recordTask(self._profiler, taskInfo.name, meta.interval, duration)
-                end
-                if not ok then
-                    self.log:error("Task '%s' wakeup error: %s", taskInfo.name, tostring(err))
-                end
-                meta.lastWakeup = now
-            end
+        if meta and meta.critical == true and self:_taskIsDue(meta, now) then
+            self:_runTask(taskInfo.name, meta, now)
         end
     end
+
+    if totalTasks <= 0 or maxNormalTasks <= 0 then
+        return
+    end
+
+    index = self._taskRoundRobinCursor or 1
+    if index < 1 or index > totalTasks then
+        index = 1
+    end
+
+    while checked < totalTasks and normalRan < maxNormalTasks do
+        if deadline and os.clock() >= deadline then
+            break
+        end
+
+        taskInfo = self._taskOrder[index]
+        meta = taskInfo and self._taskMetadata[taskInfo.name] or nil
+        if meta and meta.critical ~= true and self:_taskIsDue(meta, now) then
+            self:_runTask(taskInfo.name, meta, now)
+            normalRan = normalRan + 1
+        end
+
+        index = index + 1
+        if index > totalTasks then
+            index = 1
+        end
+        checked = checked + 1
+    end
+
+    self._taskRoundRobinCursor = index
 end
 
 function framework:_wakeupApp()
