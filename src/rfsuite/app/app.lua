@@ -224,7 +224,7 @@ function App:_headerMetrics()
     local buttonW = radio.menuButtonWidth or 100
     local buttonH = math.max(20, (radio.navbuttonHeight or 30) - HEADER_NAV_HEIGHT_REDUCTION)
     local padding = 5
-    local compactW = buttonW - math.floor((buttonW * 20) / 100)
+    local compactW = math.max(20, buttonW - math.floor((buttonW * 25) / 100))
     local reserved = (buttonW + padding) * 4 + (compactW + padding)
     return {
         width = width,
