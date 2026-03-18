@@ -8,6 +8,9 @@ local App = {}
 local MENU_ROOT_PATH = "app/menu/root.lua"
 local MASK_CACHE_MAX = 16
 local NOOP_PAINT = function() end
+local HEADER_NAV_HEIGHT_REDUCTION = 4
+local HEADER_NAV_Y_SHIFT = 6
+local HEADER_BREADCRUMB_Y_OFFSET = 5
 
 local function loadLuaTable(path)
     if type(path) ~= "string" or path == "" then
@@ -84,6 +87,26 @@ end
 
 local function normalizeNodeKey(source)
     return tostring(source or "root"):gsub("[^%w]+", "_")
+end
+
+local function trimText(value)
+    if type(value) ~= "string" then
+        return ""
+    end
+    return value:gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function appendBreadcrumbPart(parts, part)
+    part = trimText(part)
+    if part == "" then
+        return
+    end
+
+    if parts[#parts] == part then
+        return
+    end
+
+    parts[#parts + 1] = part
 end
 
 function App:init(framework)
@@ -199,7 +222,7 @@ function App:_headerMetrics()
     local radio = self.radio
     local width = self:_windowSize()
     local buttonW = radio.menuButtonWidth or 100
-    local buttonH = radio.navbuttonHeight or 30
+    local buttonH = math.max(20, (radio.navbuttonHeight or 30) - HEADER_NAV_HEIGHT_REDUCTION)
     local padding = 5
     local compactW = buttonW - math.floor((buttonW * 20) / 100)
     local reserved = (buttonW + padding) * 4 + (compactW + padding)
@@ -235,6 +258,143 @@ function App:_loadMask(path)
     end
 
     return mask
+end
+
+function App:_headerNavY()
+    return math.max(0, (self.radio.linePaddingTop or 6) - HEADER_NAV_Y_SHIFT)
+end
+
+function App:_headerTitleY()
+    return self:_headerNavY()
+end
+
+function App:_headerBreadcrumbY()
+    local metrics = self:_headerMetrics()
+    return self:_headerNavY() + metrics.buttonH + HEADER_BREADCRUMB_Y_OFFSET
+end
+
+function App:_fitTextToWidth(text, maxWidth)
+    local value = trimText(text)
+    if value == "" or type(maxWidth) ~= "number" or maxWidth <= 0 then
+        return ""
+    end
+
+    if not (lcd and lcd.getTextSize) then
+        return value
+    end
+
+    if lcd.getTextSize(value) <= maxWidth then
+        return value
+    end
+
+    local ellipsis = "..."
+    local clipped = value
+    while #clipped > 0 and lcd.getTextSize(clipped .. ellipsis) > maxWidth do
+        clipped = clipped:sub(1, -2)
+    end
+
+    if clipped == "" then
+        return ellipsis
+    end
+
+    return clipped .. ellipsis
+end
+
+function App:_nodeTitle(node, source)
+    if type(node) ~= "table" then
+        return nil
+    end
+
+    if source == MENU_ROOT_PATH and type(node.headerTitle) == "string" and trimText(node.headerTitle) ~= "" then
+        return node.headerTitle
+    end
+
+    if type(node.title) == "string" and trimText(node.title) ~= "" then
+        return node.title
+    end
+
+    return nil
+end
+
+function App:_nodeBreadcrumb(node)
+    if type(node) ~= "table" then
+        return nil
+    end
+
+    local breadcrumb = trimText(node.breadcrumb)
+    if breadcrumb ~= "" then
+        return breadcrumb
+    end
+
+    local subtitle = trimText(node.subtitle)
+    if subtitle == "" then
+        return nil
+    end
+
+    local title = trimText(node.title)
+    if title ~= "" then
+        local suffix = " / " .. title
+        if subtitle:sub(-#suffix) == suffix then
+            subtitle = trimText(subtitle:sub(1, #subtitle - #suffix))
+        elseif subtitle == title then
+            subtitle = ""
+        end
+    end
+
+    if subtitle == "" then
+        return nil
+    end
+
+    return subtitle
+end
+
+function App:_joinBreadcrumb(base, leaf)
+    local parts = {}
+    local start = trimText(base)
+
+    if start ~= "" then
+        for part in start:gmatch("([^/]+)") do
+            appendBreadcrumbPart(parts, part)
+        end
+    end
+
+    appendBreadcrumbPart(parts, leaf)
+
+    if #parts == 0 then
+        return nil
+    end
+
+    return table.concat(parts, " / ")
+end
+
+function App:_breadcrumbForItem(item)
+    if type(item) ~= "table" then
+        return nil
+    end
+
+    if self.currentNodeSource == MENU_ROOT_PATH then
+        local rootGroup = item.groupTitle
+            or (self.currentNode and self.currentNode.headerTitle)
+            or self:_nodeTitle(self.currentNode, self.currentNodeSource)
+        rootGroup = trimText(rootGroup)
+        if rootGroup ~= "" then
+            return rootGroup
+        end
+        return nil
+    end
+
+    return self:_joinBreadcrumb(
+        self:_nodeBreadcrumb(self.currentNode),
+        self:_nodeTitle(self.currentNode, self.currentNodeSource)
+    )
+end
+
+function App:_breadcrumbText()
+    if self.currentNodeSource == MENU_ROOT_PATH then
+        return nil
+    end
+
+    return self:_nodeBreadcrumb(self.currentNode)
 end
 
 function App:_telemetry()
@@ -287,6 +447,7 @@ function App:_loadNodeFromSource(source)
         return {
             title = "Load Error",
             subtitle = tostring(err),
+            breadcrumb = self:_nodeBreadcrumb(self.currentNode),
             items = {
                 {id = "error", title = "Error", kind = "static", value = tostring(err)}
             }
@@ -302,6 +463,7 @@ function App:_loadRootNode()
         return {
             title = "Rotorflight",
             subtitle = tostring(err),
+            breadcrumb = nil,
             items = {
                 {id = "error", title = "Menu Error", kind = "static", value = tostring(err)}
             }
@@ -309,6 +471,7 @@ function App:_loadRootNode()
     end
 
     self.rootLoadError = nil
+    node.breadcrumb = nil
     return node
 end
 
@@ -319,10 +482,11 @@ function App:_openRoot()
     self:_invalidateForm()
 end
 
-function App:_makeLeafNode(item)
+function App:_makeLeafNode(item, breadcrumb)
     return {
         title = item.title or item.id or "Page",
         subtitle = item.subtitle or "Page scaffold",
+        breadcrumb = breadcrumb,
         navButtons = item.navButtons or {menu = true, save = false, reload = false, tool = false, help = false},
         items = {
             {id = "status", title = "Status", kind = "static", value = item.status or "Scaffold"},
@@ -337,6 +501,8 @@ function App:_enterItem(index, item)
         return
     end
 
+    local breadcrumb = self:_breadcrumbForItem(item)
+
     self:_setSelectedIndex(self.currentNodeSource, index)
     self.pathStack[#self.pathStack + 1] = {
         source = self.currentNodeSource,
@@ -346,9 +512,10 @@ function App:_enterItem(index, item)
     if item.kind == "menu" and type(item.source) == "string" then
         self.currentNodeSource = item.source
         self.currentNode = self:_loadNodeFromSource(item.source)
+        self.currentNode.breadcrumb = breadcrumb
     else
         self.currentNodeSource = "leaf:" .. tostring(item.id or index)
-        self.currentNode = self:_makeLeafNode(item)
+        self.currentNode = self:_makeLeafNode(item, breadcrumb)
     end
 
     self:_invalidateForm()
@@ -372,7 +539,7 @@ function App:_headerTitlePos()
     local metrics = self:_headerMetrics()
     return {
         x = 0,
-        y = radio.linePaddingTop or 6,
+        y = self:_headerTitleY(),
         w = metrics.titleWidth,
         h = radio.navbuttonHeight or 30
     }
@@ -407,7 +574,7 @@ end
 
 function App:_addNavigationButtons()
     local metrics = self:_headerMetrics()
-    local y = self.radio.linePaddingTop or 6
+    local y = self:_headerNavY()
     local xRight = metrics.width - 5
     local atRoot = (#self.pathStack == 0)
     local navConfig = self:_navButtonsForNode(self.currentNode)
@@ -421,7 +588,7 @@ function App:_addNavigationButtons()
                 if atRoot then
                     self:_requestExit()
                 else
-                    self:_openRoot()
+                    self:_goBack()
                 end
             end
         },
@@ -605,6 +772,24 @@ function App:wakeup()
 end
 
 function App:paint()
+    local breadcrumb = self:_breadcrumbText()
+    local width
+
+    if breadcrumb == nil or not (lcd and lcd.drawText and lcd.font) then
+        return
+    end
+
+    width = self:_windowSize()
+    breadcrumb = self:_fitTextToWidth(breadcrumb, math.max(40, width - 8))
+    if breadcrumb == "" then
+        return
+    end
+
+    lcd.font(FONT_XXS or FONT_XS or FONT_STD)
+    if lcd.color and lcd.RGB then
+        lcd.color(lcd.RGB(170, 170, 170))
+    end
+    lcd.drawText(0, self:_headerBreadcrumbY(), breadcrumb)
 end
 
 function App:event(category, value, x, y)
