@@ -33,7 +33,7 @@ end
 
 function tool.event(category, value, x, y)
     ethos_events.debug("app", category, value, x, y, {throttleSame = true})
-    return false
+    return runtime.eventApp(category, value, x, y)
 end
 
 function tool.close()

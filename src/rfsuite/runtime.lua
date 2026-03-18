@@ -32,7 +32,8 @@ runtime.config = {
     preferencesDefaults = {
         general = {
             debugMode = false,
-            enableProfiling = false
+            enableProfiling = false,
+            iconsize = 1
         },
         developer = {
             memstats = false,
@@ -355,6 +356,12 @@ function runtime.paintApp()
     runtime.backgroundStatus()
     fw:paintApp()
     return fw
+end
+
+function runtime.eventApp(category, value, x, y)
+    local fw = runtime.openApp()
+    runtime.backgroundStatus()
+    return fw:dispatchAppEvent(category, value, x, y) == true
 end
 
 return runtime

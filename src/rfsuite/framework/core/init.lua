@@ -52,6 +52,7 @@ framework._taskMetadata = {}
 
 -- App management
 framework._app = nil
+framework._appModule = nil
 framework._appActive = false
 
 -- State
@@ -227,12 +228,8 @@ end
 
 function framework:registerApp(appModule, options)
     options = options or {}
-    self._app = appModule
-    
-    if appModule.init then
-        appModule:init(self)
-    end
-    
+    self._appModule = appModule
+    self._app = nil
     self.session:set("appRegistered", true)
 end
 
@@ -240,11 +237,32 @@ function framework:getApp()
     return self._app
 end
 
+function framework:_createAppInstance()
+    if self._app ~= nil then
+        return self._app
+    end
+
+    local appModule = self._appModule
+    if type(appModule) ~= "table" then
+        return nil
+    end
+
+    local instance = setmetatable({}, {__index = appModule})
+    if instance.init then
+        instance:init(self)
+    end
+
+    self._app = instance
+    self.session:set("appResident", true)
+    return instance
+end
+
 function framework:isAppActive()
     return self._appActive
 end
 
 function framework:activateApp()
+    self:_createAppInstance()
     self._appActive = true
     self.session:set("appActive", true)
     
@@ -264,6 +282,14 @@ function framework:deactivateApp()
     end
     
     self:_emit("app:deactivated")
+
+    if self._app and self._app.close then
+        pcall(self._app.close, self._app)
+    end
+
+    self._app = nil
+    self.session:set("appResident", false)
+    collectgarbage("collect")
 end
 
 --[[ TASK REGISTRATION & SCHEDULING ]]
@@ -488,6 +514,20 @@ function framework:wakeupApp()
     self:_wakeupApp()
 end
 
+function framework:dispatchAppEvent(category, value, x, y)
+    if not self._initialized or not self._appActive or not self._app or not self._app.event then
+        return false
+    end
+
+    local ok, handled = pcall(self._app.event, self._app, category, value, x, y)
+    if not ok then
+        self.log:error("App event error: %s", tostring(handled))
+        return false
+    end
+
+    return handled == true
+end
+
 function framework:wakeup()
     if not self._initialized then
         return
@@ -566,6 +606,8 @@ function framework:close()
     if self._app and self._app.close then
         pcall(self._app.close, self._app)
     end
+    self._app = nil
+    self._appModule = nil
     
     -- Clear callbacks and events
     self.callback:clearAll()
