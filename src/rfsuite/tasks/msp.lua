@@ -14,6 +14,7 @@ local mspHelper = require("mspapi.helper")
 local mspRegistry = require("mspapi.registry")
 local mspApiCore = require("mspapi.core")
 local mspApiFactory = require("mspapi.factory")
+local utils = require("lib.utils")
 local LIFECYCLE_ALIASES = {
     connected = "onconnect",
     disconnected = "ondisconnect",
@@ -135,6 +136,10 @@ function MSPTask:_clearLinkSession()
         "telemetrySensor",
         "telemetryModule",
         "telemetryModuleNumber",
+        "telemetryConfig",
+        "crsfTelemetryMode",
+        "crsfTelemetryLinkRate",
+        "crsfTelemetryLinkRatio",
         "fcVersion",
         "rfVersion",
         "mcu_id",
@@ -152,6 +157,10 @@ end
 
 function MSPTask:_probeWarmupDelay()
     local policy = self.framework.config.msp or {}
+
+    if system and system.getVersion and system.getVersion().simulation then
+        return 0
+    end
 
     if self.telemetryType == "sport" then
         return policy.probeWarmupSport or 0.35
@@ -412,12 +421,12 @@ function MSPTask:_isRfLinkActive(hasTelemetrySource)
     local source
     local state
 
-    if hasTelemetrySource ~= true then
-        return false
+    if system and system.getVersion and system.getVersion().simulation then
+        return self:_isSimulatorTelemetryActive()
     end
 
-    if system and system.getVersion and system.getVersion().simulation then
-        return true
+    if hasTelemetrySource ~= true then
+        return false
     end
 
     source = self:_getTelemetryActiveSource()
@@ -430,11 +439,25 @@ function MSPTask:_isRfLinkActive(hasTelemetrySource)
     return true
 end
 
+function MSPTask:_isSimulatorTelemetryActive()
+    local value = utils.simSensors("simevent_telemetry_state")
+
+    if value == nil then
+        return true
+    end
+
+    return tonumber(value) == 0
+end
+
 function MSPTask:_detectTelemetry()
     local internalModule = getModule(0)
     local externalModule = getModule(1)
     local sportSource = {appId = 0xF101, subId = 0}
     local crsfSource = {crsfId = 0x14, subIdStart = 0, subIdEnd = 1}
+
+    if system and system.getVersion and system.getVersion().simulation then
+        return "sport", nil, nil, 0
+    end
 
     if moduleEnabled(externalModule) then
         local crsfSensor = getSource(crsfSource)
@@ -462,7 +485,8 @@ function MSPTask:_updateTelemetryState()
     local session = self.framework.session
     local now = os.clock()
     local telemetryType, telemetrySensor, telemetryModule, telemetryModuleNumber = self:_detectTelemetry()
-    local hasTelemetrySource = telemetrySensor ~= nil
+    local usingSimulator = system and system.getVersion and system.getVersion().simulation == true
+    local hasTelemetrySource = telemetrySensor ~= nil or (usingSimulator and telemetryType ~= nil)
     local rfLinkActive = self:_isRfLinkActive(hasTelemetrySource)
     local linkRestored = hasTelemetrySource and rfLinkActive and self.rfLinkActive ~= true
     local transportChanged = telemetryType ~= self.telemetryType
@@ -604,15 +628,54 @@ function MSPTask:_probeApiVersion(now)
             local versionString
             local wantProto = probeVersion
             local supportedJoined = table.concat(supported, ",")
+            local minApiVersion = policy.minApiVersion or {12, 0, 8}
+            local minVersionString = string.format("%d.%02d", minApiVersion[1] or 0, minApiVersion[3] or 0)
+            local versionSupported
 
             if buffer and #buffer >= 3 then
                 versionString = string.format("%d.%02d", buffer[2] or 0, buffer[3] or 0)
             end
 
-            if versionString and supportedJoined ~= "" and not supportedJoined:find(versionString, 1, true) then
-                session:set("apiVersionInvalid", true)
-            else
-                session:set("apiVersionInvalid", false)
+            versionSupported = versionString ~= nil
+                and versionGe(versionString, minVersionString)
+                and (supportedJoined == "" or supportedJoined:find(versionString, 1, true) ~= nil)
+
+            session:set("apiVersionInvalid", versionSupported ~= true)
+
+            if versionSupported ~= true then
+                self.apiProbeInFlight = false
+                self.pendingApiProbe = false
+                self.connecting = false
+                self.connected = false
+                self.nextProbeRetryAt = 0
+                self.connectNotBefore = 0
+                self.connectAttemptStartedAt = nil
+                self.lastProbeWaitReason = nil
+                session:setMultiple({
+                    apiVersion = nil,
+                    isConnected = false,
+                    isConnecting = false,
+                    apiProbeState = "unsupported",
+                    apiProbeRetryAt = 0,
+                    apiProbeReadyAt = 0,
+                    connectionState = "disconnected",
+                    connectionReason = "unsupported_api_version",
+                    connectionTransport = self.telemetryType or "disconnected",
+                    mspTransport = self.telemetryType or "disconnected",
+                    connectionLastChangedAt = os.clock()
+                })
+                self.framework.log:connect(
+                    "Unsupported API Version: %s (requires %s or newer)",
+                    tostring(versionString or "unknown"),
+                    minVersionString
+                )
+                self.framework:_emit("msp:apiVersion", {
+                    apiVersion = versionString,
+                    protocolVersion = probeVersion,
+                    invalid = true,
+                    unsupported = true
+                })
+                return
             end
 
             if versionString and policy.allowAutoUpgrade and (policy.maxProtocol or 1) >= 2 then

@@ -27,13 +27,20 @@ def main():
         # Assume this script is: <git_src>/.vscode/scripts/deploy_step_i18n.py
         git_src = str(Path(__file__).resolve().parents[2])
 
-    # Try language JSON in out_dir first, then fall back to repo i18n folder
-    json_path = os.path.join(out_dir, "i18n", f"{lang}.json")
-    if not os.path.isfile(json_path):
-        json_path = os.path.join(git_src, "scripts", "rfsuite", "i18n", f"{lang}.json")
+    # Prefer the deployed output, then the framework's canonical i18n folder,
+    # then the legacy Rotorflight bin/i18n/json path for compatibility.
+    candidate_paths = [
+        os.path.join(out_dir, "i18n", f"{lang}.json"),
+        os.path.join(git_src, "i18n", f"{lang}.json"),
+        os.path.join(git_src, "bin", "i18n", "json", f"{lang}.json"),
+    ]
 
-    if not os.path.isfile(json_path):
-        print(f"[I18N] Skipping: {lang}.json not found at {json_path}")
+    json_path = next((path for path in candidate_paths if os.path.isfile(path)), None)
+    if not json_path:
+        print(
+            f"[I18N] Skipping: {lang}.json not found in any known location: "
+            + ", ".join(candidate_paths)
+        )
         return 0
 
     resolver = os.path.join(git_src, ".vscode", "scripts", "resolve_i18n_tags.py")

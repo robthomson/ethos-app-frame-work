@@ -237,11 +237,36 @@
     {
       "label": "Run RFSuite Sensor Tool",
       "type": "process",
-      "command": "${workspaceFolder}/bin/sensors/sensors.exe",
+      "command": "python",
+      "args": [
+        "${workspaceFolder}/bin/sensors/src/sensors.py"
+      ],
       "options": {
         "env": {
           "RFSUITE_LANG": "${config:rfsuite.deploy.language}"
         },
+        "cwd": "${workspaceFolder}/bin/sensors"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build RFSuite Sensor Tool",
+      "type": "process",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "make.cmd"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/bin/sensors/src"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Run RFSuite Sensor Tool [EXE]",
+      "type": "process",
+      "command": "${workspaceFolder}/bin/sensors/sensors.exe",
+      "options": {
         "cwd": "${workspaceFolder}/bin/sensors"
       },
       "problemMatcher": []

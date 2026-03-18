@@ -4,6 +4,7 @@
 ]] --
 
 local ini = require("lib.ini")
+local telemetryconfig = require("telemetry.config")
 local utils = require("lib.utils")
 
 local onconnect = {
@@ -222,6 +223,24 @@ local uidHook = createApiReadHook({
     end
 })
 
+local telemetryconfigHook = createApiReadHook({
+    name = "telemetryconfig",
+    apiName = "TELEMETRY_CONFIG",
+    uuid = "lifecycle-telemetry-config",
+    isReady = function(context)
+        return context.session:get("apiVersion", nil) ~= nil and context.session:get("mspBusy", false) ~= true
+    end,
+    isComplete = function(context)
+        return type(context.session:get("telemetryConfig", nil)) == "table"
+    end,
+    onReset = function(context)
+        telemetryconfig.clearSession(context.session)
+    end,
+    onComplete = function(context, api)
+        telemetryconfig.applyApiToSession(context.session, api, context.framework.log)
+    end
+})
+
 local modelpreferencesHook = {
     reset = function(context)
         context.session:clearKeys({"modelPreferences", "modelPreferencesFile"})
@@ -383,6 +402,7 @@ function onconnect.registerAll(registry)
     registry.register("onconnect", "onconnect.flightmode", flightmodeHook, {priority = 95})
     registry.register("onconnect", "onconnect.fcversion", fcversionHook, {priority = 90, timeout = 3.0})
     registry.register("onconnect", "onconnect.uid", uidHook, {priority = 85, timeout = 3.0})
+    registry.register("onconnect", "onconnect.telemetryconfig", telemetryconfigHook, {priority = 82, timeout = 3.0})
     registry.register("onconnect", "onconnect.modelpreferences", modelpreferencesHook, {priority = 80})
     registry.register("onconnect", "onconnect.sensorstats", sensorstatsHook, {priority = 75})
     registry.register("onconnect", "onconnect.timer", timerHook, {priority = 70})

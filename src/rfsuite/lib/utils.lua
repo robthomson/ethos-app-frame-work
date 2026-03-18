@@ -205,4 +205,29 @@ function utils.file_exists(path)
     return false
 end
 
+function utils.simSensors(id)
+    local chunk
+    local err
+    local result
+
+    if id == nil then
+        return 0
+    end
+
+    if os and os.mkdir then
+        pcall(os.mkdir, "LOGS:")
+        pcall(os.mkdir, "LOGS:/rfsuite")
+        pcall(os.mkdir, "LOGS:/rfsuite/sensors")
+    end
+
+    chunk, err = loadfile("sim/sensors/" .. tostring(id) .. ".lua")
+    if not chunk then
+        utils.log("Error loading telemetry file: " .. tostring(err), "warn")
+        return 0
+    end
+
+    result = chunk()
+    return result or 0
+end
+
 return utils

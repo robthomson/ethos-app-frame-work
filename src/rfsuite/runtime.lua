@@ -12,6 +12,8 @@ local App = require("app.app")
 local LoggerTask = require("tasks.logger")
 local MSPTask = require("tasks.msp")
 local LifecycleTask = require("tasks.lifecycle")
+local TelemetryTask = require("tasks.telemetry")
+local SensorsTask = require("tasks.sensors")
 
 local runtime = {}
 runtime._backgroundStatusValues = {}
@@ -23,11 +25,12 @@ runtime.config = {
     ethosVersion = {1, 6, 2},
     baseDir = "rfsuite",
     preferences = "rfsuite.user",
-    supportedMspApiVersion = {"12.07", "12.08", "12.09", "12.10"},
+    supportedMspApiVersion = {"12.08", "12.09", "12.10"},
     msp = {
         probeProtocol = 1,
         maxProtocol = 2,
         allowAutoUpgrade = true,
+        minApiVersion = {12, 0, 8},
         v2MinApiVersion = {12, 0, 9},
         probeRetryDelay = 0.75,
         probeWarmupSport = 0.35,
@@ -78,6 +81,10 @@ local function seedSession(fw)
         telemetrySourcePresent = fw.session:get("telemetrySourcePresent", false),
         telemetryLinkActive = fw.session:get("telemetryLinkActive", false),
         telemetryState = fw.session:get("telemetryState", false),
+        telemetryConfig = fw.session:get("telemetryConfig", nil),
+        crsfTelemetryMode = fw.session:get("crsfTelemetryMode", 0),
+        crsfTelemetryLinkRate = fw.session:get("crsfTelemetryLinkRate", 0),
+        crsfTelemetryLinkRatio = fw.session:get("crsfTelemetryLinkRatio", 0),
         isConnected = fw.session:get("isConnected", false),
         isConnecting = fw.session:get("isConnecting", false),
         isArmed = fw.session:get("isArmed", false),
@@ -163,6 +170,18 @@ function runtime.ensureFramework()
 
     framework:registerTask("lifecycle", LifecycleTask, {
         priority = 20,
+        interval = 0.05,
+        enabled = true
+    })
+
+    framework:registerTask("telemetry", TelemetryTask, {
+        priority = 15,
+        interval = 0.10,
+        enabled = true
+    })
+
+    framework:registerTask("sensors", SensorsTask, {
+        priority = 10,
         interval = 0.05,
         enabled = true
     })

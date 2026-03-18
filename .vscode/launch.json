@@ -72,12 +72,23 @@
       "name": "Run RFSuite Sensor Tool",
       "type": "debugpy",
       "request": "launch",
+      "program": "${workspaceFolder}/bin/sensors/src/sensors.py",
+      "cwd": "${workspaceFolder}/bin/sensors",
+      "console": "integratedTerminal",
+      "subProcess": false,
+      "justMyCode": true,
+      "stopOnEntry": false
+    },
+    {
+      "name": "Run RFSuite Sensor Tool [EXE]",
+      "type": "debugpy",
+      "request": "launch",
       "program": "${workspaceFolder}/.vscode/scripts/dummy.py",
       "console": "integratedTerminal",
       "subProcess": false,
       "justMyCode": true,
       "stopOnEntry": false,
-      "postDebugTask": "Run RFSuite Sensor Tool"
+      "preLaunchTask": "Run RFSuite Sensor Tool [EXE]"
     },
     {
       "name": "Set Deployment Language",
