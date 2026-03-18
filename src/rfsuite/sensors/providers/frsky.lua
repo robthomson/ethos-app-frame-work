@@ -3,14 +3,59 @@
   GPLv3 — https://www.gnu.org/licenses/gpl-3.0.en.html
 ]] --
 
-local sensorDefs = require("sensors.providers.frsky_sensors")
-local sidLookup = require("sensors.providers.frsky_sid_lookup")
 local utils = require("lib.utils")
 
 local Provider = {}
 Provider.__index = Provider
 
 local TELEMETRY_PHYS_ID = 27
+local SENSOR_DEFS_MODULE = "sensors.providers.frsky_sensors"
+local SENSOR_DEFS_PATH = "sensors/providers/frsky_sensors.lua"
+local SID_LOOKUP_MODULE = "sensors.providers.frsky_sid_lookup"
+local SID_LOOKUP_PATH = "sensors/providers/frsky_sid_lookup.lua"
+
+local function loadLuaModule(moduleName, path)
+    local ok
+    local result
+    local chunk
+    local loadErr
+
+    ok, result = pcall(require, moduleName)
+    if ok then
+        return result
+    end
+
+    if not loadfile then
+        return nil, result
+    end
+
+    chunk, loadErr = loadfile(path)
+    if not chunk then
+        return nil, loadErr or result
+    end
+
+    ok, result = pcall(chunk)
+    if ok then
+        return result
+    end
+
+    return nil, result
+end
+
+local function unloadLuaModule(moduleName)
+    if package and type(package.loaded) == "table" then
+        package.loaded[moduleName] = nil
+    end
+end
+
+local function loadTransientLuaModule(moduleName, path)
+    local result
+    local err
+
+    result, err = loadLuaModule(moduleName, path)
+    unloadLuaModule(moduleName)
+    return result, err
+end
 
 local function moduleNumberForSession(session)
     local source = session:get("telemetrySensor", nil)
@@ -52,6 +97,12 @@ function Provider.new(framework)
         framework = framework,
         createSensorCache = {},
         renameSensorCache = {},
+        activeCreateDefs = {},
+        activeRenameDefs = {},
+        activeProvisionAppIds = {},
+        sidLookup = nil,
+        sensorDefs = nil,
+        activeDefsSignature = nil,
         provisionedSignature = nil,
         unsupportedLogged = false,
         wasDiscoverActive = false
@@ -61,6 +112,51 @@ end
 function Provider:_clearCaches()
     self.createSensorCache = {}
     self.renameSensorCache = {}
+end
+
+function Provider:_clearActiveDefs()
+    self.activeCreateDefs = {}
+    self.activeRenameDefs = {}
+    self.activeProvisionAppIds = {}
+    self.activeDefsSignature = nil
+    self.sidLookup = nil
+    self.sensorDefs = nil
+end
+
+function Provider:_loadSidLookup()
+    local sidLookup
+    local sidLookupErr
+
+    if self.sidLookup ~= nil then
+        return self.sidLookup
+    end
+
+    sidLookup, sidLookupErr = loadTransientLuaModule(SID_LOOKUP_MODULE, SID_LOOKUP_PATH)
+    if type(sidLookup) ~= "table" then
+        utils.log("[frsky] Failed to load SID lookup table: " .. tostring(sidLookupErr or "invalid_table"), "error")
+        sidLookup = {}
+    end
+
+    self.sidLookup = sidLookup
+    return self.sidLookup
+end
+
+function Provider:_loadSensorDefs()
+    local sensorDefs
+    local sensorDefsErr
+
+    if self.sensorDefs ~= nil then
+        return self.sensorDefs
+    end
+
+    sensorDefs, sensorDefsErr = loadTransientLuaModule(SENSOR_DEFS_MODULE, SENSOR_DEFS_PATH)
+    if type(sensorDefs) ~= "table" then
+        utils.log("[frsky] Failed to load sensor definitions: " .. tostring(sensorDefsErr or "invalid_table"), "error")
+        sensorDefs = {create = {}, rename = {}, drop = {}}
+    end
+
+    self.sensorDefs = sensorDefs
+    return self.sensorDefs
 end
 
 function Provider:_ensureCreatedSensor(appId, meta)
@@ -87,7 +183,7 @@ function Provider:_ensureCreatedSensor(appId, meta)
 end
 
 function Provider:_renameSensorIfNeeded(appId)
-    local rename = sensorDefs.rename[appId]
+    local rename = self.activeRenameDefs[appId]
     local sensor = self.renameSensorCache[appId]
     local currentName
 
@@ -112,6 +208,51 @@ function Provider:_renameSensorIfNeeded(appId)
     end
 end
 
+function Provider:_rebuildActiveDefs(cfg, signature)
+    local sidLookup = self:_loadSidLookup()
+    local sensorDefs = self:_loadSensorDefs()
+    local activeCreateDefs = {}
+    local activeRenameDefs = {}
+    local activeProvisionAppIds = {}
+    local seen = {}
+    local index
+    local sid
+    local appIds
+    local j
+    local appId
+
+    if self.activeDefsSignature == signature then
+        return
+    end
+
+    for index = 1, #cfg do
+        sid = cfg[index]
+        appIds = sidLookup[sid]
+        if appIds then
+            for j = 1, #appIds do
+                appId = appIds[j]
+                if appId and not seen[appId] then
+                    seen[appId] = true
+                    activeProvisionAppIds[#activeProvisionAppIds + 1] = appId
+                end
+                if appId and sensorDefs.create and sensorDefs.create[appId] then
+                    activeCreateDefs[appId] = sensorDefs.create[appId]
+                end
+                if appId and sensorDefs.rename and sensorDefs.rename[appId] then
+                    activeRenameDefs[appId] = sensorDefs.rename[appId]
+                end
+            end
+        end
+    end
+
+    self.activeCreateDefs = activeCreateDefs
+    self.activeRenameDefs = activeRenameDefs
+    self.activeProvisionAppIds = activeProvisionAppIds
+    self.activeDefsSignature = signature
+    self.sidLookup = nil
+    self.sensorDefs = nil
+end
+
 function Provider:_configSignature()
     local cfg = self.framework.session:get("telemetryConfig", nil)
     local moduleNumber = moduleNumberForSession(self.framework.session)
@@ -133,9 +274,6 @@ function Provider:_provisionFromConfig()
     local cfg = self.framework.session:get("telemetryConfig", nil)
     local signature
     local index
-    local sid
-    local appIds
-    local j
     local appId
     local meta
 
@@ -148,19 +286,15 @@ function Provider:_provisionFromConfig()
         return
     end
 
-    for index = 1, #cfg do
-        sid = cfg[index]
-        appIds = sidLookup[sid]
-        if appIds then
-            for j = 1, #appIds do
-                appId = appIds[j]
-                meta = sensorDefs.create[appId]
-                if meta then
-                    self:_ensureCreatedSensor(appId, meta)
-                end
-                self:_renameSensorIfNeeded(appId)
-            end
+    self:_rebuildActiveDefs(cfg, signature)
+
+    for index = 1, #self.activeProvisionAppIds do
+        appId = self.activeProvisionAppIds[index]
+        meta = self.activeCreateDefs[appId]
+        if meta then
+            self:_ensureCreatedSensor(appId, meta)
         end
+        self:_renameSensorIfNeeded(appId)
     end
 
     self.provisionedSignature = signature
@@ -175,6 +309,7 @@ function Provider:wakeup()
     end
     if session:get("telemetryState", false) ~= true or session:get("telemetrySensor", nil) == nil then
         self:_clearCaches()
+        self:_clearActiveDefs()
         self.provisionedSignature = nil
         return
     end
@@ -190,6 +325,7 @@ function Provider:wakeup()
     if discoverActive then
         if not self.wasDiscoverActive then
             self:_clearCaches()
+            self:_clearActiveDefs()
             self.provisionedSignature = nil
         end
         self.wasDiscoverActive = true
@@ -198,6 +334,7 @@ function Provider:wakeup()
 
     if self.wasDiscoverActive then
         self:_clearCaches()
+        self:_clearActiveDefs()
         self.provisionedSignature = nil
         self.wasDiscoverActive = false
     end
@@ -207,6 +344,7 @@ end
 
 function Provider:reset()
     self:_clearCaches()
+    self:_clearActiveDefs()
     self.provisionedSignature = nil
     self.unsupportedLogged = false
     self.wasDiscoverActive = false

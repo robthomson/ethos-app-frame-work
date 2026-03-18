@@ -20,6 +20,10 @@ local DEFAULT_POP_BUDGET_SECONDS = 0.2
 local DEFAULT_PUBLISH_BUDGET_PER_FRAME = 50
 local DEFAULT_DIAG_LOG_COOLDOWN_SECONDS = 2.0
 local DEFAULT_WAKEUP_BUDGET_LOG_EVERY = 25
+local SID_LOOKUP_MODULE = "sensors.providers.elrs_sid_lookup"
+local SID_LOOKUP_PATH = "sensors/providers/elrs_sid_lookup.lua"
+local SENSOR_LIST_MODULE = "sensors.providers.elrs_sensors"
+local SENSOR_LIST_PATH = "sensors/providers/elrs_sensors.lua"
 
 local META_UID = {
     [0xEE01] = true,
@@ -58,24 +62,19 @@ local function loadLuaModule(moduleName, path)
     return nil, result
 end
 
-local sidLookup, sidLookupErr = loadLuaModule(
-    "sensors.providers.elrs_sid_lookup",
-    "sensors/providers/elrs_sid_lookup.lua"
-)
-if type(sidLookup) ~= "table" then
-    utils.log("[elrs] Failed to load SID lookup table: " .. tostring(sidLookupErr or "invalid_table"), "error")
-    sidLookup = {}
+local function unloadLuaModule(moduleName)
+    if package and type(package.loaded) == "table" then
+        package.loaded[moduleName] = nil
+    end
 end
 
-local sensorListFactory, sensorListFactoryErr = loadLuaModule(
-    "sensors.providers.elrs_sensors",
-    "sensors/providers/elrs_sensors.lua"
-)
-if type(sensorListFactory) ~= "function" then
-    utils.log("[elrs] Failed to load sensor list factory: " .. tostring(sensorListFactoryErr or "invalid_factory"), "error")
-    sensorListFactory = function()
-        return {}
-    end
+local function loadTransientLuaModule(moduleName, path)
+    local result
+    local err
+
+    result, err = loadLuaModule(moduleName, path)
+    unloadLuaModule(moduleName)
+    return result, err
 end
 
 local function decNil(_, pos)
@@ -189,6 +188,8 @@ function Provider.new(framework)
         lastValues = {},
         lastTimes = {},
         cachedCrsfSensor = nil,
+        sidLookup = nil,
+        sensorListFactory = nil,
         relevantSig = nil,
         relevantSidSet = nil,
         sensorsList = {},
@@ -263,6 +264,52 @@ function Provider:_sidIsRelevant(sid)
     end
 
     return self.relevantSidSet[sid] == true
+end
+
+function Provider:_loadSidLookup()
+    local sidLookup
+    local sidLookupErr
+
+    if self.sidLookup ~= nil then
+        return self.sidLookup
+    end
+
+    sidLookup, sidLookupErr = loadTransientLuaModule(SID_LOOKUP_MODULE, SID_LOOKUP_PATH)
+    if type(sidLookup) ~= "table" then
+        utils.log("[elrs] Failed to load SID lookup table: " .. tostring(sidLookupErr or "invalid_table"), "error")
+        sidLookup = {}
+    end
+
+    self.sidLookup = sidLookup
+    return self.sidLookup
+end
+
+function Provider:_releaseSidLookup()
+    self.sidLookup = nil
+end
+
+function Provider:_loadSensorListFactory()
+    local sensorListFactory
+    local sensorListFactoryErr
+
+    if self.sensorListFactory ~= nil then
+        return self.sensorListFactory
+    end
+
+    sensorListFactory, sensorListFactoryErr = loadTransientLuaModule(SENSOR_LIST_MODULE, SENSOR_LIST_PATH)
+    if type(sensorListFactory) ~= "function" then
+        utils.log("[elrs] Failed to load sensor list factory: " .. tostring(sensorListFactoryErr or "invalid_factory"), "error")
+        sensorListFactory = function()
+            return {}
+        end
+    end
+
+    self.sensorListFactory = sensorListFactory
+    return self.sensorListFactory
+end
+
+function Provider:_releaseSensorListFactory()
+    self.sensorListFactory = nil
 end
 
 function Provider:_resetPublishedSensors()
@@ -355,6 +402,7 @@ end
 
 function Provider:_rebuildRelevantSidSet()
     local config = self:_sessionGet("telemetryConfig", nil)
+    local sidLookup
     local signature
     local index
     local slotId
@@ -374,6 +422,7 @@ function Provider:_rebuildRelevantSidSet()
 
     self.relevantSig = signature
     self.relevantSidSet = {}
+    sidLookup = self:_loadSidLookup()
 
     for index = 1, #config do
         slotId = config[index]
@@ -386,10 +435,13 @@ function Provider:_rebuildRelevantSidSet()
             end
         end
     end
+
+    self:_releaseSidLookup()
 end
 
 function Provider:_rebuildActiveSensorsList(force)
     local signature = self.relevantSig or "__all__"
+    local sensorListFactory
     local fullList
     local nextList
     local sid
@@ -399,11 +451,13 @@ function Provider:_rebuildActiveSensorsList(force)
         return
     end
 
+    sensorListFactory = self:_loadSensorListFactory()
     fullList = sensorListFactory(self.decoderExports)
     if type(fullList) ~= "table" then
         utils.log("[elrs] Sensor list factory did not return a table", "error")
         self.sensorsList = {}
         self.activeSensorsListSig = signature
+        self:_releaseSensorListFactory()
         return
     end
 
@@ -418,6 +472,7 @@ function Provider:_rebuildActiveSensorsList(force)
 
     self.sensorsList = nextList
     self.activeSensorsListSig = signature
+    self:_releaseSensorListFactory()
 end
 
 function Provider:_logDiag(kind, message, level)
@@ -683,7 +738,6 @@ function Provider:wakeup()
     local budget
     local deadline
     local popCount
-    local logEvery
 
     if not self:_sessionGet("isConnected", false) then
         return
@@ -700,19 +754,6 @@ function Provider:wakeup()
             popCount = popCount + 1
             if deadline and os_clock() >= deadline then
                 self.wakeupBudgetBreakCount = self.wakeupBudgetBreakCount + 1
-                logEvery = tonumber(self.wakeupBudgetLogEvery) or DEFAULT_WAKEUP_BUDGET_LOG_EVERY
-                if self.wakeupBudgetBreakCount == 1 or (logEvery > 0 and (self.wakeupBudgetBreakCount % logEvery) == 0) then
-                    self:_logDiag(
-                        "wakeup_budget",
-                        string_format(
-                            "[elrs] wakeup budget break: budget=%.3fs frames=%d count=%d",
-                            budget,
-                            popCount,
-                            self.wakeupBudgetBreakCount
-                        ),
-                        "info"
-                    )
-                end
                 break
             end
         end
@@ -736,6 +777,8 @@ function Provider:reset()
 
     self:_resetPublishedSensors()
     self.cachedCrsfSensor = nil
+    self.sidLookup = nil
+    self.sensorListFactory = nil
     self.relevantSig = nil
     self.relevantSidSet = nil
     self.sensorsList = {}
