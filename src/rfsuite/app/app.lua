@@ -201,11 +201,12 @@ function App:_headerMetrics()
     local buttonW = radio.menuButtonWidth or 100
     local buttonH = radio.navbuttonHeight or 30
     local padding = 5
-    local navButtons = (#self.pathStack > 0) and 2 or 1
-    local reserved = (buttonW + padding) * navButtons
+    local compactW = buttonW - math.floor((buttonW * 20) / 100)
+    local reserved = (buttonW + padding) * 4 + (compactW + padding)
     return {
         width = width,
         buttonW = buttonW,
+        compactW = compactW,
         buttonH = buttonH,
         titleWidth = math.max(40, (width - 5) - reserved - 8)
     }
@@ -322,6 +323,7 @@ function App:_makeLeafNode(item)
     return {
         title = item.title or item.id or "Page",
         subtitle = item.subtitle or "Page scaffold",
+        navButtons = item.navButtons or {menu = true, save = false, reload = false, tool = false, help = false},
         items = {
             {id = "status", title = "Status", kind = "static", value = item.status or "Scaffold"},
             {id = "path", title = "Path", kind = "static", value = item.path or item.id or "n/a"},
@@ -376,38 +378,91 @@ function App:_headerTitlePos()
     }
 end
 
+function App:_navButtonsForNode(node)
+    local buttons = node and node.navButtons
+    if type(buttons) == "table" then
+        return {
+            menu = buttons.menu == true,
+            save = buttons.save == true,
+            reload = buttons.reload == true,
+            tool = buttons.tool == true,
+            help = buttons.help == true
+        }
+    end
+
+    return {menu = true, save = false, reload = false, tool = false, help = false}
+end
+
+function App:_requestExit()
+    if self.framework and self.framework.deactivateApp then
+        self.framework:deactivateApp()
+    end
+
+    if system and system.exit then
+        system.exit()
+    end
+
+    return true
+end
+
 function App:_addNavigationButtons()
     local metrics = self:_headerMetrics()
     local y = self.radio.linePaddingTop or 6
     local xRight = metrics.width - 5
+    local atRoot = (#self.pathStack == 0)
+    local navConfig = self:_navButtonsForNode(self.currentNode)
     local defs = {
         {
             key = "menu",
             text = "Menu",
-            enabled = (#self.pathStack > 0),
+            compact = false,
+            enabled = navConfig.menu == true,
             press = function()
-                if #self.pathStack > 0 then
+                if atRoot then
+                    self:_requestExit()
+                else
                     self:_openRoot()
                 end
             end
+        },
+        {
+            key = "save",
+            text = "Save",
+            compact = false,
+            enabled = navConfig.save == true,
+            press = function() end
+        },
+        {
+            key = "reload",
+            text = "Reload",
+            compact = false,
+            enabled = navConfig.reload == true,
+            press = function() end
+        },
+        {
+            key = "tool",
+            text = "*",
+            compact = true,
+            enabled = navConfig.tool == true,
+            press = function() end
+        },
+        {
+            key = "help",
+            text = "Help",
+            compact = false,
+            enabled = navConfig.help == true,
+            press = function() end
         }
     }
 
-    if #self.pathStack > 0 then
-        defs[#defs + 1] = {
-            key = "back",
-            text = "Back",
-            enabled = true,
-            press = function()
-                self:_goBack()
-            end
-        }
-    end
-
     for i = #defs, 1, -1 do
         local def = defs[i]
-        local bx = xRight - metrics.buttonW
-        local field = form.addButton(nil, {x = bx, y = y, w = metrics.buttonW, h = metrics.buttonH}, {
+        local bx
+        local field
+        local width = def.compact == true and metrics.compactW or metrics.buttonW
+
+        bx = xRight - width
+        field = form.addButton(nil, {x = bx, y = y, w = width, h = metrics.buttonH}, {
             text = def.text,
             options = FONT_S,
             paint = NOOP_PAINT,
@@ -508,7 +563,7 @@ function App:_buildGridButtons(items)
             end
         else
             local line = form.addLine(item.title or item.id or "Value")
-            local field = form.addStaticText(line, self:_statusPos(), self:_resolveItemValue(item))
+            local field = form.addStaticText(line, self:_valuePos(), self:_resolveItemValue(item))
             self.valueFields[#self.valueFields + 1] = {item = item, field = field}
         end
     end
@@ -559,7 +614,7 @@ function App:event(category, value, x, y)
         if self:_goBack() then
             return true
         end
-        return false
+        return self:_requestExit()
     end
     return false
 end
