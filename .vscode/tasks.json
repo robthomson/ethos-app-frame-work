@@ -270,6 +270,32 @@
         "cwd": "${workspaceFolder}/bin/sensors"
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Generate RFSuite Soundpack [All]",
+      "type": "process",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "generate-all.bat"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/bin/sound-generator"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Generate RFSuite Soundpack [User]",
+      "type": "process",
+      "command": "cmd",
+      "args": [
+        "/c",
+        "generate-user.bat"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/bin/sound-generator"
+      },
+      "problemMatcher": []
     }
   ]
 }

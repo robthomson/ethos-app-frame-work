@@ -9,6 +9,8 @@ local Provider = {}
 Provider.__index = Provider
 
 local FORCE_REFRESH_INTERVAL = 1.0
+local INITIAL_FORCE_REFRESH_INTERVAL = 0.25
+local INITIAL_FORCE_REFRESH_WINDOW = 3.0
 
 local API_ORDER = {
     "DATAFLASH_SUMMARY",
@@ -25,6 +27,7 @@ local API_DEFS = {
         fields = {
             flags = {
                 sessionKey = "bblFlags",
+                startupValue = 0,
                 sensor = {
                     appId = 0x5FFF,
                     name = "@i18n(sensors.blackbox.flags)@",
@@ -35,6 +38,7 @@ local API_DEFS = {
             },
             total = {
                 sessionKey = "bblSize",
+                startupValue = 0,
                 sensor = {
                     appId = 0x5FFE,
                     name = "@i18n(sensors.blackbox.size)@",
@@ -45,6 +49,7 @@ local API_DEFS = {
             },
             used = {
                 sessionKey = "bblUsed",
+                startupValue = 0,
                 sensor = {
                     appId = 0x5FFD,
                     name = "@i18n(sensors.blackbox.used)@",
@@ -130,7 +135,9 @@ function Provider.new(framework)
         inFlightApiName = nil,
         lastConnected = false,
         lastArmed = false,
-        lastModuleNumber = nil
+        lastModuleNumber = nil,
+        connectedAt = 0,
+        apiSucceeded = {}
     }, Provider)
 end
 
@@ -181,6 +188,11 @@ function Provider:_pushSensorValue(definition, value, now)
     local sensor
     local lastValue
     local useRawValue = utils.ethosVersionAtLeast({26, 1, 0})
+    local refreshInterval = FORCE_REFRESH_INTERVAL
+
+    if (self.connectedAt or 0) > 0 and (now - (self.connectedAt or 0)) < INITIAL_FORCE_REFRESH_WINDOW then
+        refreshInterval = INITIAL_FORCE_REFRESH_INTERVAL
+    end
 
     if value == nil or not definition then
         return
@@ -189,7 +201,7 @@ function Provider:_pushSensorValue(definition, value, now)
     sensor = self:_ensureSensor(definition)
     lastValue = self.lastValues[definition.appId]
 
-    if sensor and (value ~= lastValue or (now - (self.lastPush[definition.appId] or 0)) >= FORCE_REFRESH_INTERVAL) then
+    if sensor and (value ~= lastValue or (now - (self.lastPush[definition.appId] or 0)) >= refreshInterval) then
         if useRawValue and type(sensor.rawValue) == "function" then
             sensor:rawValue(value)
         else
@@ -227,16 +239,48 @@ function Provider:_applyApiFields(apiName, api)
             end
         end
     end
+
+    self.apiSucceeded[apiName] = true
+end
+
+function Provider:seedStartupPlaceholders(now)
+    local session = self.framework.session
+    local apiMeta = API_DEFS.DATAFLASH_SUMMARY
+    local fieldName
+    local fieldMeta
+
+    if session:get("isConnected", false) ~= true or session:get("apiVersion", nil) == nil then
+        return
+    end
+
+    if self.apiSucceeded.DATAFLASH_SUMMARY == true then
+        return
+    end
+
+    for fieldName, fieldMeta in pairs(apiMeta.fields or {}) do
+        if fieldMeta.sensor and fieldMeta.startupValue ~= nil then
+            self.activeSensors[fieldMeta.sensor.appId] = fieldMeta.sensor
+            if fieldMeta.sessionKey then
+                session:set(fieldMeta.sessionKey, fieldMeta.startupValue)
+            end
+            self:_pushSensorValue(fieldMeta.sensor, fieldMeta.startupValue, now)
+        end
+    end
 end
 
 function Provider:_refreshStaleSensors(now)
     local appId
     local definition
     local value
+    local refreshInterval = FORCE_REFRESH_INTERVAL
+
+    if (self.connectedAt or 0) > 0 and (now - (self.connectedAt or 0)) < INITIAL_FORCE_REFRESH_WINDOW then
+        refreshInterval = INITIAL_FORCE_REFRESH_INTERVAL
+    end
 
     for appId, definition in pairs(self.activeSensors) do
         value = self.lastValues[appId]
-        if value ~= nil and (now - (self.lastPush[appId] or 0)) >= FORCE_REFRESH_INTERVAL then
+        if value ~= nil and (now - (self.lastPush[appId] or 0)) >= refreshInterval then
             self:_pushSensorValue(definition, value, now)
         end
     end
@@ -331,9 +375,14 @@ function Provider:wakeup()
     local apiMeta
 
     if not connected or session:get("apiVersion", nil) == nil then
+        self.connectedAt = 0
         self.lastConnected = connected
         self.lastArmed = isArmed
         return
+    end
+
+    if connectedEdge then
+        self.connectedAt = now
     end
 
     if not mspTask or not mspTask.mspQueue or session:get("mspBusy", false) == true or mspTask.mspQueue:isProcessed() ~= true then
@@ -379,6 +428,8 @@ function Provider:reset()
     self.inFlightApiName = nil
     self.lastConnected = false
     self.lastArmed = false
+    self.connectedAt = 0
+    self.apiSucceeded = {}
 end
 
 return Provider

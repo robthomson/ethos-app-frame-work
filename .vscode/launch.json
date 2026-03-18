@@ -91,6 +91,28 @@
       "preLaunchTask": "Run RFSuite Sensor Tool [EXE]"
     },
     {
+      "name": "Generate RFSuite Soundpack [All]",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/.vscode/scripts/dummy.py",
+      "console": "integratedTerminal",
+      "subProcess": false,
+      "justMyCode": true,
+      "stopOnEntry": false,
+      "preLaunchTask": "Generate RFSuite Soundpack [All]"
+    },
+    {
+      "name": "Generate RFSuite Soundpack [User]",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/.vscode/scripts/dummy.py",
+      "console": "integratedTerminal",
+      "subProcess": false,
+      "justMyCode": true,
+      "stopOnEntry": false,
+      "preLaunchTask": "Generate RFSuite Soundpack [User]"
+    },
+    {
       "name": "Set Deployment Language",
       "type": "debugpy",
       "request": "launch",

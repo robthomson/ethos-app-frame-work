@@ -13,7 +13,10 @@ local LoggerTask = require("tasks.logger")
 local MSPTask = require("tasks.msp")
 local LifecycleTask = require("tasks.lifecycle")
 local TelemetryTask = require("tasks.telemetry")
+local FlightModeTask = require("tasks.flightmode")
 local SensorsTask = require("tasks.sensors")
+local TimerTask = require("tasks.timer")
+local AudioTask = require("tasks.audio")
 
 local runtime = {}
 runtime._backgroundStatusValues = {}
@@ -25,6 +28,46 @@ runtime.config = {
     ethosVersion = {1, 6, 2},
     baseDir = "rfsuite",
     preferences = "rfsuite.user",
+    preferencesDefaults = {
+        general = {
+            debugMode = false,
+            enableProfiling = false
+        },
+        developer = {
+            memstats = false,
+            taskprofiler = false,
+            apiversion = 2,
+            logmsp = false,
+            loglevel = "info"
+        },
+        events = {
+            armflags = true,
+            governor = true,
+            voltage = true,
+            pid_profile = true,
+            rate_profile = true,
+            temp_esc = false,
+            escalertvalue = 90,
+            adj_f = true,
+            adj_v = true,
+            smartfuel = true,
+            smartfuelcallout = 0,
+            smartfuelrepeats = 1,
+            smartfuelhaptic = false,
+            battery_profile = true,
+            otherModelAnnounce = false
+        },
+        timer = {
+            timeraudioenable = false,
+            elapsedalertmode = 0,
+            prealerton = false,
+            prealertperiod = 30,
+            prealertinterval = 10,
+            postalerton = false,
+            postalertperiod = 60,
+            postalertinterval = 10
+        }
+    },
     supportedMspApiVersion = {"12.08", "12.09", "12.10"},
     msp = {
         probeProtocol = 1,
@@ -180,9 +223,27 @@ function runtime.ensureFramework()
         enabled = true
     })
 
+    framework:registerTask("flightmode", FlightModeTask, {
+        priority = 14,
+        interval = 0.10,
+        enabled = true
+    })
+
     framework:registerTask("sensors", SensorsTask, {
         priority = 10,
         interval = 0.05,
+        enabled = true
+    })
+
+    framework:registerTask("timer", TimerTask, {
+        priority = 9,
+        interval = 0.25,
+        enabled = true
+    })
+
+    framework:registerTask("audio", AudioTask, {
+        priority = 8,
+        interval = 0.10,
         enabled = true
     })
 
