@@ -4,6 +4,7 @@
 ]] --
 
 local App = {}
+local ethos_events = require("framework.utils.ethos_events")
 
 local MENU_ROOT_PATH = "app/menu/root.lua"
 local MASK_CACHE_MAX = 16
@@ -50,29 +51,18 @@ local function loadShortcutsModule()
     return nil
 end
 
-local function isKey(value, name)
-    return _G[name] ~= nil and value == _G[name]
-end
+local function loadMenuVisibilityModule()
+    local mod = select(1, loadLuaTable("app/lib/menu_visibility.lua"))
 
-local function isAnyKey(value, names)
-    for i = 1, #names do
-        if isKey(value, names[i]) then
-            return true
-        end
+    if type(mod) == "table" then
+        return mod
     end
-    return false
+
+    return nil
 end
 
 local function isCloseEvent(category, value)
-    if category == EVT_CLOSE then
-        return true
-    end
-
-    return isAnyKey(value, {
-        "KEY_RTN_BREAK",
-        "KEY_EXIT_BREAK",
-        "KEY_MODEL_BREAK"
-    })
+    return ethos_events.isCloseEvent(category, value)
 end
 
 local function formatValue(value, format)
@@ -1114,6 +1104,9 @@ end
 
 function App:_loadNodeFromSource(source)
     local node, err = loadLuaTable(source)
+    local visibility
+    local filtered = {}
+    local item
     if not node then
         return {
             title = "Load Error",
@@ -1124,16 +1117,30 @@ function App:_loadNodeFromSource(source)
             }
         }
     end
+
+    visibility = loadMenuVisibilityModule()
+    if visibility and type(node.items) == "table" and type(visibility.itemVisible) == "function" then
+        for _, item in ipairs(node.items) do
+            if visibility.itemVisible(self.framework, item) == true then
+                filtered[#filtered + 1] = item
+            end
+        end
+        node.items = filtered
+    end
+
     return node
 end
 
 function App:_loadRootNode()
     local node, err = loadLuaTable(MENU_ROOT_PATH)
     local shortcuts
+    local visibility
     local shortcutItems
     local merged
+    local filtered
     local i
     local insertAt
+    local item
     if not node then
         self.rootLoadError = tostring(err)
         return {
@@ -1173,6 +1180,17 @@ function App:_loadRootNode()
 
             node.items = merged
         end
+    end
+
+    visibility = loadMenuVisibilityModule()
+    if visibility and type(node.items) == "table" and type(visibility.itemVisible) == "function" then
+        filtered = {}
+        for _, item in ipairs(node.items) do
+            if visibility.itemVisible(self.framework, item) == true then
+                filtered[#filtered + 1] = item
+            end
+        end
+        node.items = filtered
     end
 
     return node

@@ -67,6 +67,7 @@ return {
             kind = "menu",
             source = "app/menu/menus/developer.lua",
             image = "app/modules/developer/developer.png",
+            developer = true,
             group = "system",
             groupTitle = "System"
         }

@@ -19,9 +19,13 @@ local log = require("framework.utils.log")
 local EVT_NAMES = {}
 local KEY_NAMES = {}
 local TOUCH_NAMES = {}
+local CONSTANTS_BY_NAME = {}
 
 for k, v in pairs(_G) do
     if type(v) == "number" then
+        if CONSTANTS_BY_NAME[k] == nil then
+            CONSTANTS_BY_NAME[k] = v
+        end
         if (k:match("^KEY_") or k:match("^ROTARY_")) and KEY_NAMES[v] == nil then
             KEY_NAMES[v] = k
         elseif k:match("^TOUCH_") and TOUCH_NAMES[v] == nil then
@@ -46,6 +50,41 @@ local function nameWithNumber(map, n)
 end
 
 local lastLine = nil
+
+function events.getConstant(name)
+    if type(name) ~= "string" or name == "" then
+        return nil
+    end
+
+    return CONSTANTS_BY_NAME[name]
+end
+
+function events.matchesConstant(value, name)
+    local constant = events.getConstant(name)
+
+    return constant ~= nil and value == constant
+end
+
+function events.matchesAnyConstant(value, names)
+    local i
+
+    for i = 1, #(names or {}) do
+        if events.matchesConstant(value, names[i]) then
+            return true
+        end
+    end
+
+    return false
+end
+
+function events.isCloseEvent(category, value)
+    return events.matchesConstant(category, "EVT_CLOSE")
+        or events.matchesAnyConstant(value, {
+            "KEY_RTN_BREAK",
+            "KEY_EXIT_BREAK",
+            "KEY_MODEL_BREAK"
+        })
+end
 
 function events.debug(tag, category, value, x, y, options)
     options = options or {}

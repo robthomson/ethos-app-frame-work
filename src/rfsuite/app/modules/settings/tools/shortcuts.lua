@@ -78,7 +78,7 @@ local function groupChoices(groups)
 end
 
 function Page:open(ctx)
-    local registry = SHORTCUTS.buildRegistry()
+    local registry = SHORTCUTS.buildRegistry(ctx.framework)
     local maxSelected = SHORTCUTS.getMaxSelected()
     local general = ctx.framework.preferences:section("general", {})
     local selectedPrefs = ctx.framework.preferences:section("shortcuts", {})

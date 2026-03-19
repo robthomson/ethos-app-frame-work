@@ -31,6 +31,16 @@ local function loadLuaTable(path)
     return value
 end
 
+local function loadVisibilityModule()
+    local mod = select(1, loadLuaTable("app/lib/menu_visibility.lua"))
+
+    if type(mod) == "table" then
+        return mod
+    end
+
+    return nil
+end
+
 local function copyShallow(source)
     local out = {}
 
@@ -85,9 +95,10 @@ local function buildEntry(item, groupTitle, ancestry)
     }
 end
 
-local function collectMenu(registry, source, menuTitle, ancestry)
+local function collectMenu(registry, framework, source, menuTitle, ancestry)
     local menu, err = loadLuaTable(source)
     local nextAncestry = copyShallow(ancestry or {})
+    local visibility = loadVisibilityModule()
     local item
 
     if type(menu) ~= "table" then
@@ -97,45 +108,46 @@ local function collectMenu(registry, source, menuTitle, ancestry)
     nextAncestry[#nextAncestry + 1] = menu.id or menuTitle or source
 
     for _, item in ipairs(menu.items or {}) do
-        if item.kind == "page" and type(item.path) == "string" and item.path ~= "" then
-            local entry = buildEntry(item, menu.title or menuTitle, nextAncestry)
+        if (not visibility) or visibility.itemVisible(framework, item) == true then
+            if item.kind == "page" and type(item.path) == "string" and item.path ~= "" then
+                local entry = buildEntry(item, menu.title or menuTitle, nextAncestry)
 
-            if entry.id then
-                registry.byId[entry.id] = entry
-                registry.items[#registry.items + 1] = entry
+                if entry.id then
+                    registry.byId[entry.id] = entry
+                    registry.items[#registry.items + 1] = entry
+                end
+            elseif item.kind == "menu" and type(item.source) == "string" and item.source ~= "" then
+                collectMenu(registry, framework, item.source, item.title or menuTitle, nextAncestry)
             end
-        elseif item.kind == "menu" and type(item.source) == "string" and item.source ~= "" then
-            collectMenu(registry, item.source, item.title or menuTitle, nextAncestry)
         end
     end
 
     return true
 end
 
-function shortcuts.buildRegistry()
+function shortcuts.buildRegistry(framework)
     local root
     local registry
     local grouped = {}
     local groupOrder = {}
+    local visibility = loadVisibilityModule()
     local entry
-
-    if type(registryCache) == "table" then
-        return registryCache
-    end
 
     root = select(1, loadLuaTable(ROOT_MENU_PATH)) or {}
     registry = {groups = {}, items = {}, byId = {}}
 
     for _, entry in ipairs(root.items or {}) do
-        if entry.kind == "page" and type(entry.path) == "string" and entry.path ~= "" then
-            local rootEntry = buildEntry(entry, entry.groupTitle or root.headerTitle or root.title, {"root"})
+        if (not visibility) or visibility.itemVisible(framework, entry) == true then
+            if entry.kind == "page" and type(entry.path) == "string" and entry.path ~= "" then
+                local rootEntry = buildEntry(entry, entry.groupTitle or root.headerTitle or root.title, {"root"})
 
-            if rootEntry.id then
-                registry.byId[rootEntry.id] = rootEntry
-                registry.items[#registry.items + 1] = rootEntry
+                if rootEntry.id then
+                    registry.byId[rootEntry.id] = rootEntry
+                    registry.items[#registry.items + 1] = rootEntry
+                end
+            elseif entry.kind == "menu" and type(entry.source) == "string" and entry.source ~= "" then
+                collectMenu(registry, framework, entry.source, entry.title, {"root", entry.id or entry.title or entry.source})
             end
-        elseif entry.kind == "menu" and type(entry.source) == "string" and entry.source ~= "" then
-            collectMenu(registry, entry.source, entry.title, {"root", entry.id or entry.title or entry.source})
         end
     end
 
@@ -157,7 +169,6 @@ function shortcuts.buildRegistry()
         end
     end
 
-    registryCache = registry
     return registry
 end
 
@@ -203,7 +214,7 @@ function shortcuts.buildRootItems(framework)
     local general = framework.preferences:section("general", {})
     local selectedPrefs = framework.preferences:section("shortcuts", {})
     local selected = shortcuts.limitSelectionMap(selectedPrefs, MAX_SHORTCUTS)
-    local registry = shortcuts.buildRegistry()
+    local registry = shortcuts.buildRegistry(framework)
     local mixed = boolPref(general.shortcuts_mixed_in, true)
     local items = {}
     local entry
