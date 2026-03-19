@@ -19,6 +19,7 @@ local LOADER_FALLBACK_CLOSE = 0.85
 local STARTUP_LOADER_MIN_VISIBLE = 0.20
 local STARTUP_ICON_BATCH = 2
 local STARTUP_SENSOR_LOST_MUTE = 6.0
+local LOADER_PROGRESS_MULTIPLIER = 2.0
 local DIRTY_WRAPPERS_INSTALLED = false
 local DIRTY_OWNER = nil
 local unpack_fn = table.unpack or unpack
@@ -180,8 +181,8 @@ function App:init(framework)
         VSLOW = 0.5,
         SLOW = 0.75,
         DEFAULT = 1.0,
-        FAST = 1.4,
-        VFAST = 1.8
+        FAST = 2.0,
+        VFAST = 2.5
     }
     self.ui = self:_createUiBridge()
     self:_installDirtyCallbackWrappers()
@@ -864,7 +865,7 @@ function App:_refreshLoaderState()
     if active then
         progressValue = tonumber(active.progressValue)
         if progressValue == nil then
-            active.progressCounter = ((active.progressCounter or 0) + ((active.speed or 1.0) * (active.closeWhenIdle == true and 2 or 1.2))) % 100
+            active.progressCounter = ((active.progressCounter or 0) + ((active.speed or 1.0) * LOADER_PROGRESS_MULTIPLIER * (active.closeWhenIdle == true and 2 or 1.2))) % 100
         else
             active.progressCounter = math.max(0, math.min(100, progressValue))
         end
@@ -898,6 +899,33 @@ function App:_loaderSpeed(speed)
     end
 
     return self.loaderSpeed.DEFAULT
+end
+
+function App:_showMenuNavigationLoader(title, detail, speed)
+    local resolvedSpeed = speed
+
+    if type(resolvedSpeed) == "number" and resolvedSpeed < 1.0 then
+        resolvedSpeed = "FAST"
+    end
+
+    self:showLoader({
+        kind = "menu",
+        title = self:_loaderText(title, "Menu"),
+        message = "Opening menu.",
+        detail = self:_loaderText(detail, ""),
+        closeWhenIdle = false,
+        minVisibleFor = 0.12,
+        fallbackCloseAfter = 0.75,
+        speed = resolvedSpeed or "FAST"
+    })
+end
+
+function App:_clearMenuNavigationLoader()
+    local active = self.loader and self.loader.active or nil
+
+    if active and active.kind == "menu" and self.formDirty ~= true then
+        self:clearLoader()
+    end
 end
 
 function App:showLoader(options)
@@ -1354,6 +1382,7 @@ function App:_runDeferredMaintenanceStep()
     else
         self:_runNodeHook(self.currentNode, "wakeup")
         self:_updateValueFields()
+        self:_clearMenuNavigationLoader()
         if self.startupLoaderStage == 2 and self.currentNodeSource == MENU_ROOT_PATH and self.formDirty ~= true then
             self.startupLoaderStage = 0
             self:clearLoader()
@@ -1556,6 +1585,7 @@ function App:_closeNode(node)
 end
 
 function App:_openRoot()
+    self:_showMenuNavigationLoader("Configuration", "Opening main menu.")
     self:_closeNode(self.currentNode)
     self:setPageDirty(false)
     self.pathStack = {}
@@ -1661,6 +1691,7 @@ function App:_enterItem(index, item)
     end
 
     local breadcrumb = self:_breadcrumbForItem(item)
+    self:_showMenuNavigationLoader(item.title or item.id or "Menu", item.subtitle or breadcrumb, item.loaderSpeed)
 
     self:_setSelectedIndex(self.currentNodeSource, index)
     self.pathStack[#self.pathStack + 1] = {
@@ -1690,6 +1721,8 @@ function App:_goBack()
     if not previous then
         return false
     end
+
+    self:_showMenuNavigationLoader("Back", previous.breadcrumb)
 
     self:_closeNode(self.currentNode)
     self.pathStack[#self.pathStack] = nil
