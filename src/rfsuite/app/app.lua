@@ -6,6 +6,7 @@
 local App = {}
 local ethos_events = require("framework.utils.ethos_events")
 local callbackFactory = require("framework.core.callback")
+local AudioLib = require("lib.audio")
 
 local MENU_ROOT_PATH = "app/menu/root.lua"
 local MASK_CACHE_MAX = 16
@@ -20,6 +21,8 @@ local STARTUP_LOADER_MIN_VISIBLE = 0.20
 local STARTUP_ICON_BATCH = 2
 local STARTUP_SENSOR_LOST_MUTE = 6.0
 local LOADER_PROGRESS_MULTIPLIER = 2.0
+local LOADER_TIMEOUT_MESSAGE = "Error: timed out"
+local LOADER_TIMEOUT_DETAIL = "Press close to continue."
 local DIRTY_WRAPPERS_INSTALLED = false
 local DIRTY_OWNER = nil
 local unpack_fn = table.unpack or unpack
@@ -767,7 +770,7 @@ function App:_syncLoaderDialog()
         pcall(handle.value, handle, math.floor(math.max(0, math.min(100, progressValue))))
     end
     if handle and handle.closeAllowed then
-        pcall(handle.closeAllowed, handle, false)
+        pcall(handle.closeAllowed, handle, active.timedOut == true or active.allowClose == true)
     end
 end
 
@@ -852,8 +855,71 @@ function App:_loaderSignature(state)
         tostring(state.title or ""),
         tostring(self:_loaderMessage(state)),
         tostring(state.progressCounter or 0),
-        tostring(state.pendingClose == true)
+        tostring(state.pendingClose == true),
+        tostring(state.timedOut == true)
     }, "#")
+end
+
+function App:_loaderWatchdogTimeout(kind, requested)
+    local value = tonumber(requested)
+    local mspTask
+    local protocolTimeout
+
+    if requested == false then
+        return nil
+    end
+    if value ~= nil and value > 0 then
+        return value
+    end
+    if requested ~= nil and requested ~= true then
+        return nil
+    end
+    if kind ~= "progress" and kind ~= "save" then
+        return nil
+    end
+
+    mspTask = self:_msp()
+    protocolTimeout = tonumber(mspTask and mspTask.protocol and mspTask.protocol.timeout)
+
+    if kind == "save" then
+        if protocolTimeout and protocolTimeout > 0 then
+            return protocolTimeout + 5.0
+        end
+        return 8.0
+    end
+
+    if protocolTimeout and protocolTimeout > 0 then
+        return protocolTimeout
+    end
+
+    return 4.0
+end
+
+function App:_tripLoaderWatchdog(active)
+    local handle
+
+    if type(active) ~= "table" or active.timedOut == true then
+        return
+    end
+
+    active.timedOut = true
+    active.pendingClose = false
+    active.progressValue = 100
+    active.message = LOADER_TIMEOUT_MESSAGE
+    active.detail = LOADER_TIMEOUT_DETAIL
+    handle = active.handle
+
+    if handle and handle.message then
+        pcall(handle.message, handle, self:_loaderMessage(active))
+    end
+    if handle and handle.value then
+        pcall(handle.value, handle, 100)
+    end
+    if handle and handle.closeAllowed then
+        pcall(handle.closeAllowed, handle, true)
+    end
+
+    AudioLib.playFile("app", "timeout.wav")
 end
 
 function App:_refreshLoaderState()
@@ -869,11 +935,16 @@ function App:_refreshLoaderState()
         else
             active.progressCounter = math.max(0, math.min(100, progressValue))
         end
+        if active.timedOut ~= true and active.watchdogDeadline and now >= active.watchdogDeadline then
+            self:_tripLoaderWatchdog(active)
+        end
         if active.pendingClose == true and now >= (active.minVisibleUntil or 0) then
             self:_closeLoaderDialog(active.handle)
             self.loader.active = nil
             active = nil
-        elseif active.closeWhenIdle == true
+        elseif active
+            and active.timedOut ~= true
+            and active.closeWhenIdle == true
             and now >= (active.minVisibleUntil or 0)
             and self:_loaderBusyState() ~= true
             and now >= (active.fallbackCloseAt or 0) then
@@ -916,6 +987,7 @@ function App:_showMenuNavigationLoader(title, detail, speed)
         closeWhenIdle = false,
         minVisibleFor = 0.12,
         fallbackCloseAfter = 0.75,
+        watchdog = false,
         speed = resolvedSpeed or "FAST"
     })
 end
@@ -934,6 +1006,7 @@ function App:showLoader(options)
     local kind = opts.kind or "progress"
     local defaultTitle = kind == "save" and "Saving" or "Loading"
     local defaultMessage = kind == "save" and "Saving settings." or "Loading from flight controller."
+    local watchdogTimeout = self:_loaderWatchdogTimeout(kind, opts.watchdogTimeout or opts.watchdog)
 
     self.loader.active = {
         kind = kind,
@@ -943,10 +1016,13 @@ function App:showLoader(options)
         speed = self:_loaderSpeed(opts.speed),
         modal = opts.modal ~= false,
         closeWhenIdle = opts.closeWhenIdle ~= false,
+        allowClose = opts.allowClose == true,
         createdAt = now,
         minVisibleUntil = now + (tonumber(opts.minVisibleFor) or LOADER_MIN_VISIBLE),
         fallbackCloseAt = now + (tonumber(opts.fallbackCloseAfter) or LOADER_FALLBACK_CLOSE),
+        watchdogDeadline = watchdogTimeout and (now + watchdogTimeout) or nil,
         pendingClose = false,
+        timedOut = false,
         debug = opts.debug ~= false,
         progressCounter = 0,
         progressValue = tonumber(opts.progressValue)
@@ -982,8 +1058,22 @@ function App:updateLoader(options)
     if opts.closeWhenIdle ~= nil then
         active.closeWhenIdle = opts.closeWhenIdle == true
     end
+    if opts.allowClose ~= nil then
+        active.allowClose = opts.allowClose == true
+    end
     if opts.progressValue ~= nil then
         active.progressValue = tonumber(opts.progressValue)
+    end
+    if opts.watchdogTimeout ~= nil or opts.watchdog ~= nil then
+        local watchdogTimeout = self:_loaderWatchdogTimeout(active.kind, opts.watchdogTimeout or opts.watchdog)
+        active.watchdogDeadline = watchdogTimeout and (os.clock() + watchdogTimeout) or nil
+        active.timedOut = false
+    elseif opts.title ~= nil or opts.message ~= nil or opts.detail ~= nil then
+        local watchdogTimeout = self:_loaderWatchdogTimeout(active.kind, true)
+        if watchdogTimeout then
+            active.watchdogDeadline = os.clock() + watchdogTimeout
+            active.timedOut = false
+        end
     end
 
     self:_refreshLoaderState()
