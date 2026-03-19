@@ -36,6 +36,7 @@ return {
             kind = "menu",
             source = "app/menu/menus/tools.lua",
             image = "app/gfx/tools.png",
+            offline = true,
             group = "system",
             groupTitle = "System"
         },
@@ -46,6 +47,7 @@ return {
             kind = "page",
             path = "logs/logs_dir.lua",
             image = "app/modules/logs/gfx/logs.png",
+            offline = true,
             group = "system",
             groupTitle = "System",
             status = "Scaffold"
@@ -57,6 +59,7 @@ return {
             kind = "menu",
             source = "app/menu/menus/settings_admin.lua",
             image = "app/modules/settings/settings.png",
+            offline = true,
             group = "system",
             groupTitle = "System"
         },
@@ -67,6 +70,7 @@ return {
             kind = "menu",
             source = "app/menu/menus/developer.lua",
             image = "app/modules/developer/developer.png",
+            offline = true,
             developer = true,
             group = "system",
             groupTitle = "System"

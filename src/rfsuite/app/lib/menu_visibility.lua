@@ -169,6 +169,55 @@ function visibility.developerToolsEnabled(framework)
     return prefBool(general.developer_tools, false)
 end
 
+function visibility.connectionMode(framework)
+    local session
+    local connected
+    local postConnectComplete
+
+    if not framework or not framework.session then
+        return "offline"
+    end
+
+    session = framework.session
+    connected = session:get("isConnected", false) == true
+    postConnectComplete = session:get("postConnectComplete", false) == true
+
+    if not connected then
+        return "offline"
+    end
+
+    if not postConnectComplete then
+        return "postconnect"
+    end
+
+    return "online"
+end
+
+function visibility.itemEnabled(framework, spec)
+    if type(spec) ~= "table" then
+        return false
+    end
+
+    if spec.disabled == true then
+        return false
+    end
+
+    if spec.offline == true then
+        return true
+    end
+
+    return visibility.connectionMode(framework) == "online"
+end
+
+function visibility.accessSignature(framework)
+    local apiVersion = currentApiVersion(framework)
+
+    return table.concat({
+        tostring(apiVersion or "none"),
+        visibility.developerToolsEnabled(framework) == true and "developer" or "standard"
+    }, "|")
+end
+
 function visibility.itemVisible(framework, spec)
     local apiVersion
 

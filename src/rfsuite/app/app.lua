@@ -124,6 +124,8 @@ function App:init(framework)
 
     self.framework = framework
     self.telemetryTask = nil
+    self.menuAccessSignature = nil
+    self.menuEnableSignature = nil
     radioConfig, radioErr = loadLuaTable("app/radios.lua")
     if type(radioConfig) ~= "table" then
         error("failed to load app/radios.lua: " .. tostring(radioErr))
@@ -1134,6 +1136,118 @@ function App:_resolveItemValue(item)
     return item.valueHint or ""
 end
 
+function App:_itemEnabled(item)
+    local visibility = loadMenuVisibilityModule()
+
+    if visibility and type(visibility.itemEnabled) == "function" then
+        return visibility.itemEnabled(self.framework, item)
+    end
+
+    return type(item) == "table" and item.disabled ~= true
+end
+
+function App:_currentMenuAccessSignature()
+    local visibility = loadMenuVisibilityModule()
+
+    if visibility and type(visibility.accessSignature) == "function" then
+        return visibility.accessSignature(self.framework)
+    end
+
+    return "default"
+end
+
+function App:_currentMenuEnableSignature()
+    local visibility = loadMenuVisibilityModule()
+
+    if visibility and type(visibility.connectionMode) == "function" then
+        return visibility.connectionMode(self.framework)
+    end
+
+    return "default"
+end
+
+function App:_reloadCurrentMenuNode()
+    local breadcrumb
+
+    if self.currentNodeSource == MENU_ROOT_PATH then
+        self.currentNode = self:_loadRootNode()
+        self:_afterNodeChanged()
+        return
+    end
+
+    if type(self.currentNodeSource) ~= "string" then
+        return
+    end
+
+    if self.currentNodeSource:sub(1, 5) == "page:" or self.currentNodeSource:sub(1, 5) == "leaf:" then
+        return
+    end
+
+    breadcrumb = self.currentNode and self.currentNode.breadcrumb or nil
+    self.currentNode = self:_loadNodeFromSource(self.currentNodeSource)
+    if type(self.currentNode) == "table" and type(breadcrumb) == "string" and breadcrumb ~= "" then
+        self.currentNode.breadcrumb = breadcrumb
+    end
+    self:_afterNodeChanged()
+end
+
+function App:_refreshMenuAccess()
+    local signature = self:_currentMenuAccessSignature()
+
+    if self.menuAccessSignature == signature then
+        return
+    end
+
+    self.menuAccessSignature = signature
+    self:_reloadCurrentMenuNode()
+    self:_invalidateForm()
+end
+
+function App:_syncMenuButtonStates()
+    local buttonIndex = 0
+    local items = self.currentNode and self.currentNode.items or nil
+    local selectedIndex = self:_getSelectedIndex(self.currentNodeSource)
+    local firstEnabledField = nil
+    local selectedField = nil
+    local selectedEnabled = false
+    local signature = self:_currentMenuEnableSignature()
+    local signatureChanged = (self.menuEnableSignature ~= signature)
+    local item
+    local field
+    local enabled
+
+    if type(items) ~= "table" then
+        self.menuEnableSignature = signature
+        return
+    end
+
+    for _, item in ipairs(items) do
+        if item.kind == "menu" or item.kind == "page" then
+            buttonIndex = buttonIndex + 1
+            field = self.buttonFields[buttonIndex]
+            enabled = self:_itemEnabled(item)
+            if field and field.enable then
+                field:enable(enabled)
+            end
+            if enabled and firstEnabledField == nil and field then
+                firstEnabledField = field
+            end
+            if buttonIndex == selectedIndex then
+                selectedField = field
+                selectedEnabled = enabled == true
+            end
+        end
+    end
+
+    self.menuEnableSignature = signature
+
+    if signatureChanged and selectedEnabled ~= true and firstEnabledField and firstEnabledField.focus then
+        firstEnabledField:focus()
+    elseif signatureChanged and selectedEnabled == true and selectedField and selectedField.focus then
+        selectedField:focus()
+    end
+end
+
 function App:_refreshSnapshot()
     return
 end
@@ -1334,6 +1448,10 @@ end
 
 function App:_enterItem(index, item)
     if type(item) ~= "table" then
+        return
+    end
+
+    if self:_itemEnabled(item) ~= true then
         return
     end
 
@@ -1557,6 +1675,8 @@ function App:_buildGridButtons(items)
     local y = 0
     local activeGroup = nil
     local buttonIndex = 0
+    local focusApplied = false
+    local firstEnabledField = nil
 
     for _, item in ipairs(items) do
         if item.kind == "menu" or item.kind == "page" then
@@ -1579,6 +1699,7 @@ function App:_buildGridButtons(items)
             local icon = nil
             local selectedIndex = buttonIndex
             local selectedItem = item
+            local enabled = self:_itemEnabled(selectedItem)
             if iconsize ~= 0 and item.image then
                 icon = self:_loadMask(item.image)
             end
@@ -1595,10 +1716,14 @@ function App:_buildGridButtons(items)
 
             self.buttonFields[selectedIndex] = field
             if field and field.enable then
-                field:enable(selectedItem.disabled ~= true)
+                field:enable(enabled)
             end
-            if selectedIndex == prefsIndex and field and field.focus then
+            if enabled and firstEnabledField == nil and field then
+                firstEnabledField = field
+            end
+            if selectedIndex == prefsIndex and enabled and field and field.focus then
                 field:focus()
+                focusApplied = true
             end
 
             lc = lc + 1
@@ -1610,6 +1735,10 @@ function App:_buildGridButtons(items)
             local field = form.addStaticText(line, self:_valuePos(), self:_resolveItemValue(item))
             self.valueFields[#self.valueFields + 1] = {item = item, field = field}
         end
+    end
+
+    if focusApplied ~= true and firstEnabledField and firstEnabledField.focus then
+        firstEnabledField:focus()
     end
 end
 
@@ -1653,10 +1782,12 @@ end
 
 function App:wakeup()
     self:_refreshSnapshot()
+    self:_refreshMenuAccess()
     if self.currentNode == nil then
         self.currentNode = self:_loadRootNode()
     end
     self:_rebuildFormIfNeeded()
+    self:_syncMenuButtonStates()
     self:_runNodeHook(self.currentNode, "wakeup")
     self:_updateValueFields()
     self:_refreshLoaderState()

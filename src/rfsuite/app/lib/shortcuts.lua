@@ -91,7 +91,9 @@ local function buildEntry(item, groupTitle, ancestry)
         subtitle = item.subtitle or "Page",
         path = item.path,
         image = item.image,
-        groupTitle = groupTitle or "Shortcuts"
+        groupTitle = groupTitle or "Shortcuts",
+        offline = item.offline == true,
+        disabled = item.disabled == true
     }
 end
 
@@ -230,6 +232,8 @@ function shortcuts.buildRootItems(framework)
                 image = entry.image,
                 group = "shortcuts",
                 groupTitle = "Shortcuts",
+                offline = entry.offline == true,
+                disabled = entry.disabled == true,
                 _mixedShortcut = (mixed == true),
                 shortcutId = entry.id,
                 shortcutOriginalGroupTitle = entry.groupTitle
