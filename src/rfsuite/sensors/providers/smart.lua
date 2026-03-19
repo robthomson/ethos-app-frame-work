@@ -51,13 +51,21 @@ local function syncSensorMetadata(sensor, definition, moduleNumber)
 end
 
 local function moduleNumberForSession(session)
+    local moduleNumber = session:get("telemetryModuleNumber", nil)
     local source = session:get("telemetrySensor", nil)
 
-    if source and type(source.module) == "function" then
-        return source:module()
+    if type(moduleNumber) == "number" then
+        return moduleNumber
     end
 
-    return 0
+    if source and type(source.module) == "function" then
+        moduleNumber = source:module()
+        if type(moduleNumber) == "number" then
+            return moduleNumber
+        end
+    end
+
+    return nil
 end
 
 function Provider.new(framework)
@@ -65,15 +73,32 @@ function Provider.new(framework)
         framework = framework,
         sensors = {},
         lastValues = {},
-        lastPush = {}
+        lastPush = {},
+        lastModuleNumber = nil
     }, Provider)
+end
+
+function Provider:_resetSensorCaches()
+    self.sensors = {}
+    self.lastValues = {}
+    self.lastPush = {}
+    self.lastModuleNumber = nil
+end
+
+function Provider:_ensureModuleCache()
+    local moduleNumber = moduleNumberForSession(self.framework.session)
+
+    if type(moduleNumber) == "number" and self.lastModuleNumber ~= moduleNumber then
+        self:_resetSensorCaches()
+        self.lastModuleNumber = moduleNumber
+    end
+
+    return moduleNumber or self.lastModuleNumber
 end
 
 function Provider:_ensureSensor(definition)
     local sensor = self.sensors[definition.appId]
-    local moduleNumber
-
-    moduleNumber = moduleNumberForSession(self.framework.session)
+    local moduleNumber = self:_ensureModuleCache()
 
     if sensor then
         syncSensorMetadata(sensor, definition, moduleNumber)
@@ -87,12 +112,49 @@ function Provider:_ensureSensor(definition)
         return sensor
     end
 
+    if type(moduleNumber) ~= "number" then
+        return nil
+    end
+
     sensor = model.createSensor({type = SENSOR_TYPE_DIY})
     sensor:appId(definition.appId)
     syncSensorMetadata(sensor, definition, moduleNumber)
 
     self.sensors[definition.appId] = sensor
     return sensor
+end
+
+function Provider:_refreshStaleSensors(now)
+    local appId
+    local definition
+    local sensor
+    local value
+
+    for _, definition in pairs(SENSOR_DEFS) do
+        appId = definition.appId
+        value = self.lastValues[appId]
+        if value ~= nil and (now - (self.lastPush[appId] or 0)) >= FORCE_REFRESH_INTERVAL then
+            sensor = self:_ensureSensor(definition)
+            if sensor then
+                if utils.ethosVersionAtLeast({26, 1, 0}) and type(sensor.rawValue) == "function" then
+                    sensor:rawValue(value)
+                else
+                    sensor:value(value)
+                end
+                self.lastPush[appId] = now
+            end
+        end
+    end
+end
+
+function Provider:refresh(now)
+    local refreshAt = now or os.clock()
+
+    if not (self.framework.session:get("telemetryState", false) or (system and system.getVersion and system.getVersion().simulation == true)) then
+        return
+    end
+
+    self:_refreshStaleSensors(refreshAt)
 end
 
 function Provider:wakeup()
@@ -131,9 +193,7 @@ function Provider:wakeup()
 end
 
 function Provider:reset()
-    self.sensors = {}
-    self.lastValues = {}
-    self.lastPush = {}
+    self:_resetSensorCaches()
 end
 
 return Provider

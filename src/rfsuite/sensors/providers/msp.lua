@@ -92,13 +92,21 @@ local API_DEFS = {
 }
 
 local function moduleNumberForSession(session)
+    local moduleNumber = session:get("telemetryModuleNumber", nil)
     local source = session:get("telemetrySensor", nil)
 
-    if source and type(source.module) == "function" then
-        return source:module()
+    if type(moduleNumber) == "number" then
+        return moduleNumber
     end
 
-    return 0
+    if source and type(source.module) == "function" then
+        moduleNumber = source:module()
+        if type(moduleNumber) == "number" then
+            return moduleNumber
+        end
+    end
+
+    return nil
 end
 
 local function syncSensorMetadata(sensor, definition, moduleNumber)
@@ -152,12 +160,12 @@ end
 function Provider:_ensureModuleCache()
     local moduleNumber = moduleNumberForSession(self.framework.session)
 
-    if self.lastModuleNumber ~= moduleNumber then
+    if type(moduleNumber) == "number" and self.lastModuleNumber ~= moduleNumber then
         self:_resetSensorCaches()
         self.lastModuleNumber = moduleNumber
     end
 
-    return moduleNumber
+    return moduleNumber or self.lastModuleNumber
 end
 
 function Provider:_ensureSensor(definition)
@@ -174,6 +182,10 @@ function Provider:_ensureSensor(definition)
         syncSensorMetadata(sensor, definition, moduleNumber)
         self.sensors[definition.appId] = sensor
         return sensor
+    end
+
+    if type(moduleNumber) ~= "number" then
+        return nil
     end
 
     sensor = model.createSensor({type = SENSOR_TYPE_DIY})
@@ -284,6 +296,21 @@ function Provider:_refreshStaleSensors(now)
             self:_pushSensorValue(definition, value, now)
         end
     end
+end
+
+function Provider:refresh(now)
+    local session = self.framework.session
+    local refreshAt = now or os.clock()
+
+    if session:get("isConnected", false) ~= true or session:get("apiVersion", nil) == nil then
+        return
+    end
+
+    if (self.connectedAt or 0) <= 0 then
+        self.connectedAt = refreshAt
+    end
+
+    self:_refreshStaleSensors(refreshAt)
 end
 
 function Provider:_intervalFor(apiName, isArmed)

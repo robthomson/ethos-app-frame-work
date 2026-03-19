@@ -21,10 +21,6 @@ end
 
 function tool.wakeup()
     runtime.wakeupApp()
-
-    if lcd and lcd.invalidate then
-        lcd.invalidate()
-    end
 end
 
 function tool.paint()

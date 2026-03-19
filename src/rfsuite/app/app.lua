@@ -16,6 +16,8 @@ local HEADER_RIGHT_GUTTER = 12
 local LOADER_MIN_VISIBLE = 0.35
 local LOADER_FALLBACK_CLOSE = 0.85
 local STARTUP_LOADER_MIN_VISIBLE = 0.20
+local STARTUP_ICON_BATCH = 2
+local STARTUP_SENSOR_LOST_MUTE = 6.0
 local DIRTY_WRAPPERS_INSTALLED = false
 local DIRTY_OWNER = nil
 local unpack_fn = table.unpack or unpack
@@ -128,6 +130,10 @@ function App:init(framework)
     self.menuAccessSignature = nil
     self.menuEnableSignature = nil
     self.startupLoaderStage = 0
+    self.startupJob = nil
+    self._startupCallback = function()
+        self:_runStartupPreparationStep()
+    end
     radioConfig, radioErr = loadLuaTable("app/radios.lua")
     if type(radioConfig) ~= "table" then
         error("failed to load app/radios.lua: " .. tostring(radioErr))
@@ -1256,8 +1262,125 @@ function App:_refreshSnapshot()
     return
 end
 
+function App:_collectNodeIconPaths(node)
+    local seen = {}
+    local paths = {}
+    local items = node and node.items or {}
+    local i
+    local path
+
+    for i = 1, #items do
+        path = items[i] and items[i].image or nil
+        if type(path) == "string" and path ~= "" and seen[path] ~= true then
+            seen[path] = true
+            paths[#paths + 1] = path
+        end
+    end
+
+    return paths
+end
+
+function App:_cancelStartupPreparation()
+    if self.framework and self.framework.callback and self._startupCallback then
+        self.framework.callback:clear(self._startupCallback)
+    end
+
+    self.startupJob = nil
+end
+
+function App:_scheduleStartupPreparation()
+    local job = self.startupJob
+
+    if not job or job.scheduled == true or not self.framework or not self.framework.callbackNow then
+        return
+    end
+
+    job.scheduled = true
+    self.framework:callbackNow(self._startupCallback, "render")
+end
+
+function App:_runStartupPreparationStep()
+    local job = self.startupJob
+    local endIndex
+    local i
+    local loaded
+
+    if not job or self.startupLoaderStage ~= 1 or not self.framework then
+        return
+    end
+
+    job.scheduled = false
+
+    if job.phase == "load_root" then
+        job.node = self:_loadRootNode()
+        job.iconPaths = self:_collectNodeIconPaths(job.node)
+        job.totalIcons = #job.iconPaths
+        job.nextIconIndex = 1
+
+        if job.totalIcons > 0 then
+            job.phase = "preload_icons"
+            self:updateLoader({detail = string.format("Caching icons 0/%d.", job.totalIcons)})
+        else
+            job.phase = "ready"
+            job.ready = true
+            self:updateLoader({detail = "Finishing menu."})
+        end
+    elseif job.phase == "preload_icons" then
+        endIndex = math.min(job.nextIconIndex + STARTUP_ICON_BATCH - 1, job.totalIcons)
+        for i = job.nextIconIndex, endIndex do
+            self:_loadMask(job.iconPaths[i])
+        end
+        job.nextIconIndex = endIndex + 1
+        loaded = math.min(endIndex, job.totalIcons)
+        self:updateLoader({detail = string.format("Caching icons %d/%d.", loaded, job.totalIcons)})
+
+        if job.nextIconIndex > job.totalIcons then
+            job.phase = "ready"
+            job.ready = true
+            self:updateLoader({detail = "Finishing menu."})
+        end
+    end
+
+    if job.ready ~= true then
+        self:_scheduleStartupPreparation()
+    end
+end
+
+function App:_consumePreparedStartupRoot()
+    local job = self.startupJob
+
+    if not job or job.ready ~= true or type(job.node) ~= "table" then
+        return false
+    end
+
+    self.currentNodeSource = MENU_ROOT_PATH
+    self.currentNode = job.node
+    self.pathStack = {}
+    self:setPageDirty(false)
+    self:_afterNodeChanged()
+    self:_invalidateForm()
+    self.startupJob = nil
+    return true
+end
+
 function App:_startInitialToolLoad()
+    local sensorsTask = self.framework and self.framework.getTask and self.framework:getTask("sensors") or nil
+
+    if sensorsTask and type(sensorsTask.armSensorLostMute) == "function" then
+        sensorsTask:armSensorLostMute(STARTUP_SENSOR_LOST_MUTE)
+    end
+
     self.startupLoaderStage = 1
+    self:_cancelStartupPreparation()
+    self.startupJob = {
+        phase = "load_root",
+        scheduled = false,
+        ready = false,
+        node = nil,
+        iconPaths = nil,
+        totalIcons = 0,
+        nextIconIndex = 1
+    }
     self:showLoader({
         kind = "progress",
         title = "Loading",
@@ -1267,6 +1390,7 @@ function App:_startInitialToolLoad()
         closeWhenIdle = false,
         minVisibleFor = STARTUP_LOADER_MIN_VISIBLE
     })
+    self:_scheduleStartupPreparation()
 end
 
 function App:_loadNodeFromSource(source)
@@ -1801,15 +1925,13 @@ function App:wakeup()
     self:_refreshSnapshot()
 
     if self.startupLoaderStage == 1 then
+        if self.currentNode == nil and self:_consumePreparedStartupRoot() ~= true then
+            self:_refreshLoaderState()
+            return
+        end
         self.startupLoaderStage = 2
-        self:_refreshLoaderState()
-        return
     end
 
-    if self.startupLoaderStage == 2 and self.currentNode == nil then
-        self:_openRoot()
-        self.startupLoaderStage = 3
-    end
     self:_refreshMenuAccess()
     if self.currentNode == nil then
         self.currentNode = self:_loadRootNode()
@@ -1818,7 +1940,7 @@ function App:wakeup()
     self:_syncMenuButtonStates()
     self:_runNodeHook(self.currentNode, "wakeup")
     self:_updateValueFields()
-    if self.startupLoaderStage == 3 and self.currentNodeSource == MENU_ROOT_PATH and self.formDirty ~= true then
+    if self.startupLoaderStage == 2 and self.currentNodeSource == MENU_ROOT_PATH and self.formDirty ~= true then
         self.startupLoaderStage = 0
         self:clearLoader()
     end
@@ -1873,6 +1995,7 @@ function App:onActivate()
     self.menuAccessSignature = self:_currentMenuAccessSignature()
     self.menuEnableSignature = self:_currentMenuEnableSignature()
     self.startupLoaderStage = 0
+    self:_cancelStartupPreparation()
     self:_startInitialToolLoad()
 end
 
@@ -1887,6 +2010,7 @@ function App:onDeactivate()
     self.loader.status = nil
     self.loader.signature = nil
     self.startupLoaderStage = 0
+    self:_cancelStartupPreparation()
     self:_closeNode(self.currentNode)
     safeFormClear()
     self:_clearFormRefs()
@@ -1908,6 +2032,7 @@ function App:close()
     self.loader.status = nil
     self.loader.signature = nil
     self.startupLoaderStage = 0
+    self:_cancelStartupPreparation()
     self:_closeNode(self.currentNode)
     safeFormClear()
     self:_clearFormRefs()

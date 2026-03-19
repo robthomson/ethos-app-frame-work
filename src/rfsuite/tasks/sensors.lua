@@ -37,6 +37,20 @@ function SensorsTask:_armSensorLostMute(now)
     self.sensorLostMuteModuleId = nil
 end
 
+function SensorsTask:armSensorLostMute(seconds)
+    local now = os.clock()
+    local duration = tonumber(seconds) or SENSOR_LOST_MUTE_SECONDS
+
+    if duration <= 0 then
+        return
+    end
+
+    self.sensorLostMuteUntil = math.max(self.sensorLostMuteUntil or 0, now + duration)
+    self.sensorLostMuteRefreshAt = 0
+    self.sensorLostMuteModuleId = nil
+    self:_muteSensorLostDuringStartup(now)
+end
+
 function SensorsTask:_telemetryModuleId()
     local session = self.framework.session
     local moduleId = session:get("telemetryModuleNumber", nil)
@@ -330,6 +344,12 @@ function SensorsTask:wakeup()
     self:_muteSensorLostDuringStartup(now)
     if self.providers.msp and self.providers.msp.seedStartupPlaceholders then
         self.providers.msp:seedStartupPlaceholders(now)
+    end
+    if self.providers.msp and self.providers.msp.refresh then
+        self.providers.msp:refresh(now)
+    end
+    if self.providers.smart and self.providers.smart.refresh then
+        self.providers.smart:refresh(now)
     end
 
     if session:get("lifecycleActive", false) == true then

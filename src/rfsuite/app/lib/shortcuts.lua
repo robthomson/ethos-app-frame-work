@@ -130,10 +130,16 @@ end
 function shortcuts.buildRegistry(framework)
     local root
     local registry
+    local signature
     local grouped = {}
     local groupOrder = {}
     local visibility = loadVisibilityModule()
     local entry
+
+    signature = visibility and visibility.accessSignature and visibility.accessSignature(framework) or "default"
+    if registryCache and registryCache.signature == signature and type(registryCache.registry) == "table" then
+        return registryCache.registry
+    end
 
     root = select(1, loadLuaTable(ROOT_MENU_PATH)) or {}
     registry = {groups = {}, items = {}, byId = {}}
@@ -171,6 +177,11 @@ function shortcuts.buildRegistry(framework)
         end
     end
 
+    registryCache = {
+        signature = signature,
+        registry = registry
+    }
+
     return registry
 end
 
@@ -189,8 +200,8 @@ function shortcuts.isSelected(prefs, id)
     return isTruthy(prefs[id])
 end
 
-function shortcuts.limitSelectionMap(prefs, maxSelected)
-    local registry = shortcuts.buildRegistry()
+function shortcuts.limitSelectionMap(prefs, maxSelected, registry)
+    registry = registry or shortcuts.buildRegistry()
     local selected = {}
     local selectedCount = 0
     local limit = tonumber(maxSelected) or MAX_SHORTCUTS
@@ -215,8 +226,8 @@ end
 function shortcuts.buildRootItems(framework)
     local general = framework.preferences:section("general", {})
     local selectedPrefs = framework.preferences:section("shortcuts", {})
-    local selected = shortcuts.limitSelectionMap(selectedPrefs, MAX_SHORTCUTS)
     local registry = shortcuts.buildRegistry(framework)
+    local selected = shortcuts.limitSelectionMap(selectedPrefs, MAX_SHORTCUTS, registry)
     local mixed = boolPref(general.shortcuts_mixed_in, true)
     local items = {}
     local entry
