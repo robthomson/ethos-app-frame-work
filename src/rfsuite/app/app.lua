@@ -15,6 +15,7 @@ local HEADER_BREADCRUMB_Y_OFFSET = 5
 local HEADER_RIGHT_GUTTER = 12
 local LOADER_MIN_VISIBLE = 0.35
 local LOADER_FALLBACK_CLOSE = 0.85
+local STARTUP_LOADER_MIN_VISIBLE = 0.20
 local DIRTY_WRAPPERS_INSTALLED = false
 local DIRTY_OWNER = nil
 local unpack_fn = table.unpack or unpack
@@ -126,6 +127,7 @@ function App:init(framework)
     self.telemetryTask = nil
     self.menuAccessSignature = nil
     self.menuEnableSignature = nil
+    self.startupLoaderStage = 0
     radioConfig, radioErr = loadLuaTable("app/radios.lua")
     if type(radioConfig) ~= "table" then
         error("failed to load app/radios.lua: " .. tostring(radioErr))
@@ -662,7 +664,9 @@ function App:_openLoaderDialog(title, message)
     local opts = {
         title = title,
         message = message,
-        wakeup = function() end,
+        wakeup = function()
+            self:_refreshLoaderState()
+        end,
         paint = function() end,
         options = TEXT_LEFT
     }
@@ -1252,6 +1256,19 @@ function App:_refreshSnapshot()
     return
 end
 
+function App:_startInitialToolLoad()
+    self.startupLoaderStage = 1
+    self:showLoader({
+        kind = "progress",
+        title = "Loading",
+        message = "Opening main menu.",
+        debug = false,
+        modal = true,
+        closeWhenIdle = false,
+        minVisibleFor = STARTUP_LOADER_MIN_VISIBLE
+    })
+end
+
 function App:_loadNodeFromSource(source)
     local node, err = loadLuaTable(source)
     local visibility
@@ -1782,6 +1799,17 @@ end
 
 function App:wakeup()
     self:_refreshSnapshot()
+
+    if self.startupLoaderStage == 1 then
+        self.startupLoaderStage = 2
+        self:_refreshLoaderState()
+        return
+    end
+
+    if self.startupLoaderStage == 2 and self.currentNode == nil then
+        self:_openRoot()
+        self.startupLoaderStage = 3
+    end
     self:_refreshMenuAccess()
     if self.currentNode == nil then
         self.currentNode = self:_loadRootNode()
@@ -1790,6 +1818,10 @@ function App:wakeup()
     self:_syncMenuButtonStates()
     self:_runNodeHook(self.currentNode, "wakeup")
     self:_updateValueFields()
+    if self.startupLoaderStage == 3 and self.currentNodeSource == MENU_ROOT_PATH and self.formDirty ~= true then
+        self.startupLoaderStage = 0
+        self:clearLoader()
+    end
     self:_refreshLoaderState()
 end
 
@@ -1838,7 +1870,10 @@ function App:onActivate()
     self.loader.active = nil
     self.loader.status = nil
     self.loader.signature = nil
-    self:_openRoot()
+    self.menuAccessSignature = self:_currentMenuAccessSignature()
+    self.menuEnableSignature = self:_currentMenuEnableSignature()
+    self.startupLoaderStage = 0
+    self:_startInitialToolLoad()
 end
 
 function App:onDeactivate()
@@ -1851,6 +1886,7 @@ function App:onDeactivate()
     self.loader.active = nil
     self.loader.status = nil
     self.loader.signature = nil
+    self.startupLoaderStage = 0
     self:_closeNode(self.currentNode)
     safeFormClear()
     self:_clearFormRefs()
@@ -1871,6 +1907,7 @@ function App:close()
     self.loader.active = nil
     self.loader.status = nil
     self.loader.signature = nil
+    self.startupLoaderStage = 0
     self:_closeNode(self.currentNode)
     safeFormClear()
     self:_clearFormRefs()
