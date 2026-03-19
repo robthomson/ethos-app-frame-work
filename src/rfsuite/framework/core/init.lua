@@ -73,8 +73,9 @@ framework._renderCallbackWakeupOptions = {
     category = "render"
 }
 framework._taskSchedulerOptions = {
+    maxCriticalLoopMs = 4,
     maxLoopMs = 8,
-    maxNormalTasksPerWakeup = 2
+    maxNormalTasksPerWakeup = 3
 }
 framework._taskRoundRobinCursor = 1
 
@@ -115,8 +116,9 @@ function framework:init(config)
     self._profiler = self.profiler.new(self.config.developer or {})
     self._idleGcLastAt = 0
     self._taskSchedulerOptions = {
+        maxCriticalLoopMs = ((self.config.taskScheduler or {}).maxCriticalLoopMs) or 4,
         maxLoopMs = ((self.config.taskScheduler or {}).maxLoopMs) or 8,
-        maxNormalTasksPerWakeup = ((self.config.taskScheduler or {}).maxNormalTasksPerWakeup) or 2
+        maxNormalTasksPerWakeup = ((self.config.taskScheduler or {}).maxNormalTasksPerWakeup) or 3
     }
     self._taskRoundRobinCursor = 1
     
@@ -434,6 +436,9 @@ function framework:_wakeupTasks()
 
     local now = os.clock()
     local scheduler = self._taskSchedulerOptions or {}
+    local criticalDeadline =
+        (tonumber(scheduler.maxCriticalLoopMs) or 0) > 0 and (now + ((tonumber(scheduler.maxCriticalLoopMs) or 0) / 1000.0))
+        or nil
     local deadline = (tonumber(scheduler.maxLoopMs) or 0) > 0 and (now + ((tonumber(scheduler.maxLoopMs) or 0) / 1000.0)) or nil
     local maxNormalTasks = tonumber(scheduler.maxNormalTasksPerWakeup) or 0
     local normalRan = 0
@@ -444,6 +449,10 @@ function framework:_wakeupTasks()
     local meta
 
     for _, taskInfo in ipairs(self._taskOrder) do
+        if criticalDeadline and os.clock() >= criticalDeadline then
+            break
+        end
+
         local meta = self._taskMetadata[taskInfo.name]
         if meta and meta.critical == true and self:_taskIsDue(meta, now) then
             self:_runTask(taskInfo.name, meta, now)

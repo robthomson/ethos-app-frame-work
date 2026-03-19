@@ -11,6 +11,7 @@ Provider.__index = Provider
 local FORCE_REFRESH_INTERVAL = 1.0
 local INITIAL_FORCE_REFRESH_INTERVAL = 0.25
 local INITIAL_FORCE_REFRESH_WINDOW = 3.0
+local BUSY_FORCE_REFRESH_INTERVAL = 0.2
 
 local API_ORDER = {
     "DATAFLASH_SUMMARY",
@@ -145,7 +146,8 @@ function Provider.new(framework)
         lastArmed = false,
         lastModuleNumber = nil,
         connectedAt = 0,
-        apiSucceeded = {}
+        apiSucceeded = {},
+        lastBusyHeartbeatAt = 0
     }, Provider)
 end
 
@@ -298,6 +300,32 @@ function Provider:_refreshStaleSensors(now)
     end
 end
 
+function Provider:busyHeartbeat(now)
+    local session = self.framework.session
+    local refreshAt = now or os.clock()
+    local appId
+    local definition
+    local value
+
+    if session:get("isConnected", false) ~= true or session:get("apiVersion", nil) == nil then
+        return
+    end
+
+    if (refreshAt - (self.lastBusyHeartbeatAt or 0)) < BUSY_FORCE_REFRESH_INTERVAL then
+        return
+    end
+
+    self.lastBusyHeartbeatAt = refreshAt
+
+    for appId, definition in pairs(self.activeSensors) do
+        value = self.lastValues[appId]
+        if value ~= nil then
+            self.lastPush[appId] = 0
+            self:_pushSensorValue(definition, value, refreshAt)
+        end
+    end
+end
+
 function Provider:refresh(now)
     local session = self.framework.session
     local refreshAt = now or os.clock()
@@ -308,6 +336,10 @@ function Provider:refresh(now)
 
     if (self.connectedAt or 0) <= 0 then
         self.connectedAt = refreshAt
+    end
+
+    if session:get("mspBusy", false) == true then
+        self:busyHeartbeat(refreshAt)
     end
 
     self:_refreshStaleSensors(refreshAt)
@@ -412,7 +444,14 @@ function Provider:wakeup()
         self.connectedAt = now
     end
 
-    if not mspTask or not mspTask.mspQueue or session:get("mspBusy", false) == true or mspTask.mspQueue:isProcessed() ~= true then
+    if session:get("mspBusy", false) == true then
+        self:busyHeartbeat(now)
+        self.lastConnected = connected
+        self.lastArmed = isArmed
+        return
+    end
+
+    if not mspTask or not mspTask.mspQueue or mspTask.mspQueue:isProcessed() ~= true then
         self.lastConnected = connected
         self.lastArmed = isArmed
         return
@@ -457,6 +496,7 @@ function Provider:reset()
     self.lastArmed = false
     self.connectedAt = 0
     self.apiSucceeded = {}
+    self.lastBusyHeartbeatAt = 0
 end
 
 return Provider

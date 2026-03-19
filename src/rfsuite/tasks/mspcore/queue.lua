@@ -44,8 +44,38 @@ function queue.new(options)
         mspInterval = opts.mspInterval or 0.15,
         maxDepth = opts.maxDepth or 20,
         requeueExpired = opts.requeueExpired ~= false,
-        maxExpireCount = opts.maxExpireCount or 2
+        maxExpireCount = opts.maxExpireCount or 2,
+        activityHandler = opts.activityHandler,
+        logHandler = opts.logHandler
     }, {__index = queue})
+end
+
+function queue:setActivityHandler(fn)
+    self.activityHandler = fn
+end
+
+function queue:setLogHandler(fn)
+    self.logHandler = fn
+end
+
+function queue:_notifyActivity(now)
+    local handler = self.activityHandler
+
+    if type(handler) ~= "function" then
+        return
+    end
+
+    pcall(handler, self, now, self.current, self:queueCount() + (self.current and 1 or 0))
+end
+
+function queue:_notifyLog(kind, message, payload, extra)
+    local handler = self.logHandler
+
+    if type(handler) ~= "function" then
+        return
+    end
+
+    pcall(handler, self, kind, message, payload, extra)
 end
 
 function queue:configure(protocol)
@@ -176,6 +206,10 @@ function queue:process(transport, protocol, codec, now)
         return false
     end
 
+    if self.current or self:queueCount() > 0 then
+        self:_notifyActivity(now)
+    end
+
     if not self.current then
         if now < self.nextMessageAt then
             return false
@@ -214,6 +248,9 @@ function queue:process(transport, protocol, codec, now)
             self.retryCount = self.retryCount + 1
             self.lastSentAt = now
             self.firstSentAt = self.firstSentAt or now
+            if self.retryCount == 1 then
+                self:_notifyLog("tx", message, message.payload or {}, nil)
+            end
         end
     end
 
@@ -224,16 +261,19 @@ function queue:process(transport, protocol, codec, now)
         if message.processReply then
             pcall(message.processReply, message, buffer, errorFlag)
         end
+        self:_notifyLog("rx", message, buffer, errorFlag)
         self:_finish(now)
         return true
     end
 
     if self.firstSentAt and (now - self.firstSentAt) > timeout then
+        self:_notifyLog("timeout", message, nil, "timeout")
         self:_requeueExpiredMessage(now, "timeout", transport, codec)
         return true
     end
 
     if self.retryCount > self.maxRetries then
+        self:_notifyLog("timeout", message, nil, "max_retries")
         self:_requeueExpiredMessage(now, "max_retries", transport, codec)
         return true
     end

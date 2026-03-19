@@ -88,8 +88,9 @@ runtime.config = {
         connectWatchdogCooldown = 3.0
     },
     taskScheduler = {
+        maxCriticalLoopMs = 4,
         maxLoopMs = 8,
-        maxNormalTasksPerWakeup = 2
+        maxNormalTasksPerWakeup = 3
     },
     mspProtocolVersion = 1,
     bgTaskName = "Rotorflight [Background]",
@@ -217,7 +218,7 @@ function runtime.ensureFramework()
 
     framework:registerTask("msp", MSPTask, {
         priority = 25,
-        interval = 0.05,
+        interval = 0.10,
         critical = true,
         enabled = true
     })

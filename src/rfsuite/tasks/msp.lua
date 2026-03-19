@@ -21,6 +21,28 @@ local LIFECYCLE_ALIASES = {
     transportChanged = "ontransportchange"
 }
 
+local function summarizeBytes(buffer, limit)
+    local values = {}
+    local maxItems = tonumber(limit) or 24
+    local index
+    local count
+
+    if type(buffer) ~= "table" then
+        return ""
+    end
+
+    count = #buffer
+    for index = 1, math.min(count, maxItems) do
+        values[#values + 1] = tostring(buffer[index])
+    end
+
+    if count > maxItems then
+        values[#values + 1] = "..."
+    end
+
+    return table.concat(values, ",")
+end
+
 local function splitVersionStringToNumbers(versionString)
     local parts = {0}
 
@@ -171,6 +193,50 @@ function MSPTask:_probeWarmupDelay()
     end
 
     return 0
+end
+
+function MSPTask:_isMspLoggingEnabled()
+    local developer = self.framework and self.framework.preferences and self.framework.preferences:section("developer", {}) or {}
+    return developer.logmsp == true
+end
+
+function MSPTask:_logMspTraffic(kind, message, payload, extra)
+    local command
+    local apiName
+    local data
+
+    if self:_isMspLoggingEnabled() ~= true then
+        return
+    end
+
+    command = message and message.command or "?"
+    apiName = message and message.apiName or message and message.apiname or nil
+
+    if kind == "tx" then
+        data = summarizeBytes(payload, 24)
+        self.framework.log:info(
+            "[msp] tx cmd=%s api=%s payload=[%s]",
+            tostring(command),
+            tostring(apiName or "-"),
+            data
+        )
+    elseif kind == "rx" then
+        data = summarizeBytes(payload, 24)
+        self.framework.log:info(
+            "[msp] rx cmd=%s api=%s error=%s payload=[%s]",
+            tostring(command),
+            tostring(apiName or "-"),
+            tostring(extra == true),
+            data
+        )
+    elseif kind == "timeout" then
+        self.framework.log:warn(
+            "[msp] %s cmd=%s api=%s",
+            tostring(extra or "timeout"),
+            tostring(command),
+            tostring(apiName or "-")
+        )
+    end
 end
 
 function MSPTask:_armApiProbe(now)
@@ -810,6 +876,17 @@ function MSPTask:init(framework)
     self.connectionToken = 0
     self.codec = codecFactory.new()
     self.queue = queueFactory.new()
+    self.queue:setActivityHandler(function(_, now)
+        local sensorsTask = self.framework and self.framework.getTask and self.framework:getTask("sensors") or nil
+        local mspSensorProvider = sensorsTask and sensorsTask.providers and sensorsTask.providers.msp or nil
+
+        if mspSensorProvider and mspSensorProvider.busyHeartbeat then
+            mspSensorProvider:busyHeartbeat(now)
+        end
+    end)
+    self.queue:setLogHandler(function(_, kind, message, payload, extra)
+        self:_logMspTraffic(kind, message, payload, extra)
+    end)
     self.mspQueue = self.queue
     self.mspHelper = mspHelper
     self.api = mspRegistry

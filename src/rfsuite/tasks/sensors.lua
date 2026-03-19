@@ -74,10 +74,11 @@ end
 function SensorsTask:_muteSensorLostDuringStartup(now)
     local transport
     local moduleId
+    local module
     local duration
     local moduleIndex
 
-    if not system or type(system.muteSensorLost) ~= "function" then
+    if not model or type(model.getModule) ~= "function" then
         return
     end
 
@@ -99,11 +100,21 @@ function SensorsTask:_muteSensorLostDuringStartup(now)
     duration = math.max(0.5, (self.sensorLostMuteUntil or now) - now)
 
     if type(moduleId) == "number" then
-        pcall(system.muteSensorLost, moduleId, duration)
-        self.sensorLostMuteModuleId = moduleId
+        module = model.getModule(moduleId)
+        if module and type(module.muteSensorLost) == "function" then
+            pcall(function()
+                module:muteSensorLost(duration)
+            end)
+            self.sensorLostMuteModuleId = moduleId
+        end
     else
         for moduleIndex = 0, 1 do
-            pcall(system.muteSensorLost, moduleIndex, duration)
+            module = model.getModule(moduleIndex)
+            if module and type(module.muteSensorLost) == "function" then
+                pcall(function()
+                    module:muteSensorLost(duration)
+                end)
+            end
         end
         self.sensorLostMuteModuleId = "all"
     end
