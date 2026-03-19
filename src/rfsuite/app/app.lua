@@ -336,6 +336,42 @@ function App:_loadMask(path)
     return mask
 end
 
+function App:_pruneMaskCacheForNode(node)
+    local keep = {}
+    local newOrder = {}
+    local i
+    local item
+    local path
+
+    if type(self.maskCache) ~= "table" or type(self.maskCacheOrder) ~= "table" then
+        return
+    end
+
+    for i = 1, #((node and node.items) or {}) do
+        item = node.items[i]
+        path = item and item.image
+        if type(path) == "string" and path ~= "" then
+            keep[path] = true
+        end
+    end
+
+    for i = 1, #self.maskCacheOrder do
+        path = self.maskCacheOrder[i]
+        if keep[path] == true then
+            newOrder[#newOrder + 1] = path
+        else
+            self.maskCache[path] = nil
+        end
+    end
+
+    self.maskCacheOrder = newOrder
+end
+
+function App:_afterNodeChanged()
+    self:_pruneMaskCacheForNode(self.currentNode)
+    pcall(collectgarbage, "step", 64)
+end
+
 function App:_reportNodeError(context, err)
     if self.framework and self.framework.log and self.framework.log.error then
         self.framework.log:error("App %s error: %s", tostring(context), tostring(err))
@@ -1206,6 +1242,7 @@ function App:_openRoot()
     self.pathStack = {}
     self.currentNodeSource = MENU_ROOT_PATH
     self.currentNode = self:_loadRootNode()
+    self:_afterNodeChanged()
     self:_invalidateForm()
 end
 
@@ -1305,7 +1342,7 @@ function App:_enterItem(index, item)
     self:_setSelectedIndex(self.currentNodeSource, index)
     self.pathStack[#self.pathStack + 1] = {
         source = self.currentNodeSource,
-        node = self.currentNode
+        breadcrumb = self.currentNode and self.currentNode.breadcrumb or nil
     }
 
     if item.kind == "menu" and type(item.source) == "string" then
@@ -1321,6 +1358,7 @@ function App:_enterItem(index, item)
     end
 
     self:setPageDirty(false)
+    self:_afterNodeChanged()
     self:_invalidateForm()
 end
 
@@ -1336,9 +1374,13 @@ function App:_goBack()
     if previous.source == MENU_ROOT_PATH then
         self.currentNode = self:_loadRootNode()
     else
-        self.currentNode = previous.node
+        self.currentNode = self:_loadNodeFromSource(previous.source)
+        if type(self.currentNode) == "table" then
+            self.currentNode.breadcrumb = previous.breadcrumb
+        end
     end
     self:setPageDirty(false)
+    self:_afterNodeChanged()
     self:_invalidateForm()
     return true
 end
@@ -1683,6 +1725,9 @@ function App:onDeactivate()
     self:_clearFormRefs()
     self.currentNode = nil
     self.pathStack = {}
+    self.maskCache = {}
+    self.maskCacheOrder = {}
+    pcall(collectgarbage, "collect")
 end
 
 function App:close()
