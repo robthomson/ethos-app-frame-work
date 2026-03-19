@@ -5,6 +5,7 @@
 
 local App = {}
 local ethos_events = require("framework.utils.ethos_events")
+local callbackFactory = require("framework.core.callback")
 
 local MENU_ROOT_PATH = "app/menu/root.lua"
 local MASK_CACHE_MAX = 16
@@ -21,6 +22,17 @@ local STARTUP_SENSOR_LOST_MUTE = 6.0
 local DIRTY_WRAPPERS_INSTALLED = false
 local DIRTY_OWNER = nil
 local unpack_fn = table.unpack or unpack
+local APP_CALLBACK_WAKEUP_OPTIONS = {
+    maxCalls = 6,
+    budgetMs = 2,
+    categories = {"immediate", "timer", "events"}
+}
+local APP_RENDER_CALLBACK_WAKEUP_OPTIONS = {
+    maxCalls = 4,
+    budgetMs = 2,
+    category = "render"
+}
+local APP_MAINTENANCE_PHASES = 3
 
 local function loadLuaTable(path)
     if type(path) ~= "string" or path == "" then
@@ -126,6 +138,7 @@ function App:init(framework)
     local radioConfig, radioErr
 
     self.framework = framework
+    self.callback = callbackFactory.new()
     self.telemetryTask = nil
     self.menuAccessSignature = nil
     self.menuEnableSignature = nil
@@ -133,6 +146,11 @@ function App:init(framework)
     self.startupJob = nil
     self._startupCallback = function()
         self:_runStartupPreparationStep()
+    end
+    self.maintenanceScheduled = false
+    self.maintenancePhase = 0
+    self._maintenanceCallback = function()
+        self:_runDeferredMaintenanceStep()
     end
     radioConfig, radioErr = loadLuaTable("app/radios.lua")
     if type(radioConfig) ~= "table" then
@@ -1281,22 +1299,68 @@ function App:_collectNodeIconPaths(node)
 end
 
 function App:_cancelStartupPreparation()
-    if self.framework and self.framework.callback and self._startupCallback then
-        self.framework.callback:clear(self._startupCallback)
+    if self.callback and self._startupCallback then
+        self.callback:clear(self._startupCallback)
     end
 
     self.startupJob = nil
 end
 
+function App:_cancelDeferredMaintenance()
+    if self.callback and self._maintenanceCallback then
+        self.callback:clear(self._maintenanceCallback)
+    end
+
+    self.maintenanceScheduled = false
+end
+
 function App:_scheduleStartupPreparation()
     local job = self.startupJob
 
-    if not job or job.scheduled == true or not self.framework or not self.framework.callbackNow then
+    if not job or job.scheduled == true or not self.callback then
         return
     end
 
     job.scheduled = true
-    self.framework:callbackNow(self._startupCallback, "render")
+    self.callback:now(self._startupCallback, "immediate")
+end
+
+function App:_scheduleDeferredMaintenance()
+    if not self.callback or self.maintenanceScheduled == true or self.startupLoaderStage == 1 then
+        return
+    end
+
+    self.maintenanceScheduled = true
+    self.callback:now(self._maintenanceCallback, "immediate")
+end
+
+function App:_runDeferredMaintenanceStep()
+    local phase = self.maintenancePhase or 0
+
+    self.maintenanceScheduled = false
+
+    if self.startupLoaderStage == 1 or not self.framework then
+        return
+    end
+
+    if phase == 0 then
+        self:_refreshMenuAccess()
+        if self.currentNode == nil then
+            self.currentNode = self:_loadRootNode()
+        end
+    elseif phase == 1 then
+        self:_rebuildFormIfNeeded()
+        self:_syncMenuButtonStates()
+    else
+        self:_runNodeHook(self.currentNode, "wakeup")
+        self:_updateValueFields()
+        if self.startupLoaderStage == 2 and self.currentNodeSource == MENU_ROOT_PATH and self.formDirty ~= true then
+            self.startupLoaderStage = 0
+            self:clearLoader()
+        end
+    end
+
+    self.maintenancePhase = (phase + 1) % APP_MAINTENANCE_PHASES
 end
 
 function App:_runStartupPreparationStep()
@@ -1922,6 +1986,10 @@ function App:_updateValueFields()
 end
 
 function App:wakeup()
+    if self.callback then
+        self.callback:wakeup(APP_CALLBACK_WAKEUP_OPTIONS)
+    end
+
     self:_refreshSnapshot()
 
     if self.startupLoaderStage == 1 then
@@ -1932,22 +2000,15 @@ function App:wakeup()
         self.startupLoaderStage = 2
     end
 
-    self:_refreshMenuAccess()
-    if self.currentNode == nil then
-        self.currentNode = self:_loadRootNode()
-    end
-    self:_rebuildFormIfNeeded()
-    self:_syncMenuButtonStates()
-    self:_runNodeHook(self.currentNode, "wakeup")
-    self:_updateValueFields()
-    if self.startupLoaderStage == 2 and self.currentNodeSource == MENU_ROOT_PATH and self.formDirty ~= true then
-        self.startupLoaderStage = 0
-        self:clearLoader()
-    end
+    self:_scheduleDeferredMaintenance()
     self:_refreshLoaderState()
 end
 
 function App:paint()
+    if self.callback then
+        self.callback:wakeup(APP_RENDER_CALLBACK_WAKEUP_OPTIONS)
+    end
+
     self:_runNodeHook(self.currentNode, "paint")
 
     local breadcrumb = self:_breadcrumbText()
@@ -1996,6 +2057,8 @@ function App:onActivate()
     self.menuEnableSignature = self:_currentMenuEnableSignature()
     self.startupLoaderStage = 0
     self:_cancelStartupPreparation()
+    self:_cancelDeferredMaintenance()
+    self.maintenancePhase = 0
     self:_startInitialToolLoad()
 end
 
@@ -2011,6 +2074,11 @@ function App:onDeactivate()
     self.loader.signature = nil
     self.startupLoaderStage = 0
     self:_cancelStartupPreparation()
+    self:_cancelDeferredMaintenance()
+    self.maintenancePhase = 0
+    if self.callback then
+        self.callback:clearAll()
+    end
     self:_closeNode(self.currentNode)
     safeFormClear()
     self:_clearFormRefs()
@@ -2033,6 +2101,10 @@ function App:close()
     self.loader.signature = nil
     self.startupLoaderStage = 0
     self:_cancelStartupPreparation()
+    self:_cancelDeferredMaintenance()
+    if self.callback then
+        self.callback:clearAll()
+    end
     self:_closeNode(self.currentNode)
     safeFormClear()
     self:_clearFormRefs()
@@ -2042,6 +2114,8 @@ function App:close()
     self.telemetryTask = nil
     self.maskCache = nil
     self.maskCacheOrder = nil
+    self.callback = nil
+    self._maintenanceCallback = nil
     pcall(function()
         self.framework.preferences:save()
     end)

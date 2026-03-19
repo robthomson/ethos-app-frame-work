@@ -24,6 +24,22 @@ local os_clock = os.clock
 local table_insert = table.insert
 local table_remove = table.remove
 
+local function copyTable(source)
+    local out = {}
+    local key
+    local value
+
+    for key, value in pairs(source or {}) do
+        if type(value) == "table" then
+            out[key] = copyTable(value)
+        else
+            out[key] = value
+        end
+    end
+
+    return out
+end
+
 callback._queues = {
     immediate = {},
     timer = {},
@@ -36,6 +52,8 @@ callback._budgets = {
     events = {maxCalls = 24, budgetMs = 6},
     default = {maxCalls = 16, budgetMs = 4},
 }
+
+local callback_mt = {__index = callback}
 
 -- Entry structure: {time=nil, func=func, interval=nil, category=category}
 
@@ -181,6 +199,16 @@ function callback:getStats()
         totalQueued = total,
         queues = self._queues
     }
+end
+
+function callback.new(options)
+    local opts = options or {}
+    local instance = setmetatable({
+        _queues = copyTable(opts.queues or callback._queues),
+        _budgets = copyTable(opts.budgets or callback._budgets)
+    }, callback_mt)
+
+    return instance
 end
 
 return callback

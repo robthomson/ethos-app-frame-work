@@ -218,7 +218,7 @@ function runtime.ensureFramework()
 
     framework:registerTask("msp", MSPTask, {
         priority = 25,
-        interval = 0.10,
+        interval = 0.08,
         critical = true,
         enabled = true
     })
