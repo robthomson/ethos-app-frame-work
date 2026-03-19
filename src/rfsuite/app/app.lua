@@ -12,6 +12,8 @@ local HEADER_NAV_HEIGHT_REDUCTION = 4
 local HEADER_NAV_Y_SHIFT = 6
 local HEADER_BREADCRUMB_Y_OFFSET = 5
 local HEADER_RIGHT_GUTTER = 12
+local LOADER_MIN_VISIBLE = 0.35
+local LOADER_FALLBACK_CLOSE = 0.85
 local DIRTY_WRAPPERS_INSTALLED = false
 local DIRTY_OWNER = nil
 local unpack_fn = table.unpack or unpack
@@ -113,6 +115,10 @@ local function appendBreadcrumbPart(parts, part)
     parts[#parts + 1] = part
 end
 
+local function boolString(value)
+    return value == true and "Yes" or "No"
+end
+
 function App:init(framework)
     local radioConfig, radioErr
 
@@ -136,6 +142,20 @@ function App:init(framework)
     self.maskCache = {}
     self.maskCacheOrder = {}
     self.pageDirty = false
+    self.mspTask = nil
+    self.loader = {
+        active = nil,
+        status = nil,
+        signature = nil
+    }
+    self.loaderSpeed = {
+        VSLOW = 0.5,
+        SLOW = 0.75,
+        DEFAULT = 1.0,
+        FAST = 1.4,
+        VFAST = 1.8
+    }
+    self.ui = self:_createUiBridge()
     self:_installDirtyCallbackWrappers()
 end
 
@@ -522,6 +542,383 @@ function App:_runNodeHook(node, hookName, ...)
     end
 
     return result, true
+end
+
+function App:_createUiBridge()
+    return {
+        progressDisplay = function(title, message, speed)
+            return self:showLoader({
+                kind = "progress",
+                title = title,
+                message = message,
+                speed = speed,
+                closeWhenIdle = true,
+                fallbackCloseAfter = 1.10,
+                modal = true
+            })
+        end,
+        progressDisplaySave = function(message)
+            return self:showLoader({
+                kind = "save",
+                title = "Saving",
+                message = message,
+                closeWhenIdle = true,
+                fallbackCloseAfter = LOADER_FALLBACK_CLOSE,
+                modal = true
+            })
+        end,
+        updateProgressDialogMessage = function(message)
+            return self:updateLoader({message = message})
+        end,
+        clearProgressDialog = function()
+            return self:clearLoader()
+        end,
+        progressClose = function()
+            return self:clearLoader()
+        end,
+        closeLoader = function()
+            return self:clearLoader()
+        end,
+        progressDisplayIsActive = function()
+            return self:isLoaderActive()
+        end,
+        setPageDirty = function(isDirty)
+            return self:setPageDirty(isDirty)
+        end,
+        registerProgressDialog = function(_, baseMessage)
+            return self:updateLoader({message = baseMessage})
+        end,
+        showLoader = function(options)
+            return self:showLoader(options)
+        end,
+        updateLoader = function(options)
+            return self:updateLoader(options)
+        end,
+        hideLoader = function()
+            return self:clearLoader()
+        end
+    }
+end
+
+function App:_msp()
+    if self.mspTask == nil and self.framework and self.framework.getTask then
+        self.mspTask = self.framework:getTask("msp")
+    end
+    return self.mspTask
+end
+
+function App:_loaderText(value, fallback)
+    local text = trimText(value)
+
+    if text == "" then
+        return fallback or ""
+    end
+    if text:find("@i18n%(", 1, false) ~= nil then
+        return fallback or ""
+    end
+
+    return text
+end
+
+function App:_openLoaderDialog(title, message)
+    local opts = {
+        title = title,
+        message = message,
+        wakeup = function() end,
+        paint = function() end,
+        options = TEXT_LEFT
+    }
+
+    if form and form.openWaitDialog then
+        opts.progress = true
+        return form.openWaitDialog(opts)
+    end
+    if form and form.openProgressDialog then
+        opts.progress = true
+        return form.openProgressDialog(opts)
+    end
+    if form and form.openDialog then
+        opts.width = nil
+        return form.openDialog(opts)
+    end
+
+    return nil
+end
+
+function App:_closeLoaderDialog(handle)
+    if handle and handle.close then
+        pcall(handle.close, handle)
+    end
+end
+
+function App:_loaderMessage(state)
+    local parts = {}
+    local base = self:_loaderText(state.message, "Working.")
+    local detail = self:_loaderText(state.detail, "")
+    local lines = state.debug ~= false and self:_generalBool("mspstatusdialog", true) == true and self:_mspDebugLines() or nil
+
+    if base ~= "" then
+        parts[#parts + 1] = base
+    end
+    if detail ~= "" then
+        parts[#parts + 1] = detail
+    end
+    if type(lines) == "table" then
+        for i = 1, math.min(#lines, 3) do
+            parts[#parts + 1] = lines[i]
+        end
+    end
+
+    if #parts == 0 then
+        return "Working."
+    end
+
+    return table.concat(parts, "\n")
+end
+
+function App:_syncLoaderDialog()
+    local active = self.loader.active
+    local handle
+    local message
+    local progressValue
+
+    if active == nil then
+        return
+    end
+
+    handle = active.handle
+    message = self:_loaderMessage(active)
+    progressValue = tonumber(active.progressValue)
+    if progressValue == nil then
+        progressValue = tonumber(active.progressCounter) or 0
+    end
+
+    if handle and handle.message then
+        pcall(handle.message, handle, message)
+    end
+    if handle and handle.value then
+        pcall(handle.value, handle, math.floor(math.max(0, math.min(100, progressValue))))
+    end
+    if handle and handle.closeAllowed then
+        pcall(handle.closeAllowed, handle, false)
+    end
+end
+
+function App:_loaderBusyState()
+    local session = self.framework and self.framework.session
+    local apiProbeState
+
+    if not session then
+        return false
+    end
+
+    apiProbeState = tostring(session:get("apiProbeState", "idle") or "idle")
+
+    if session:get("lifecycleActive", false) == true then
+        return true
+    end
+    if session:get("isConnecting", false) == true then
+        return true
+    end
+    if session:get("mspBusy", false) == true then
+        return true
+    end
+    if apiProbeState ~= "idle" and apiProbeState ~= "connected" then
+        return true
+    end
+
+    return false
+end
+
+function App:_mspDebugLines()
+    local session = self.framework and self.framework.session
+    local mspTask = self:_msp()
+    local queue = mspTask and mspTask.queue or nil
+    local queueDepth
+    local retryCount
+    local apiProbeState
+    local transport
+    local command
+    local connectionState
+    local reason
+    local lines = {}
+
+    if not session then
+        return lines
+    end
+
+    queueDepth = tonumber(session:get("mspQueueDepth", 0)) or 0
+    retryCount = queue and tonumber(queue.retryCount) or 0
+    apiProbeState = tostring(session:get("apiProbeState", "idle") or "idle")
+    transport = tostring(session:get("connectionTransport", "disconnected") or "disconnected")
+    command = tostring(session:get("mspLastCommand", "idle") or "idle")
+    connectionState = tostring(session:get("connectionState", "disconnected") or "disconnected")
+    reason = tostring(session:get("connectionReason", "startup") or "startup")
+
+    lines[#lines + 1] = string.format(
+        "Queue %d  Busy %s  Retry %d",
+        queueDepth,
+        boolString(session:get("mspBusy", false) == true),
+        math.max(0, retryCount - 1)
+    )
+    lines[#lines + 1] = string.format(
+        "Probe %s  Cmd %s  Link %s",
+        apiProbeState,
+        command,
+        transport
+    )
+    lines[#lines + 1] = string.format(
+        "Conn %s  Reason %s",
+        connectionState,
+        reason
+    )
+
+    return lines
+end
+
+function App:_loaderSignature(state)
+    if type(state) ~= "table" then
+        return "none"
+    end
+
+    return table.concat({
+        tostring(state.title or ""),
+        tostring(self:_loaderMessage(state)),
+        tostring(state.progressCounter or 0),
+        tostring(state.pendingClose == true)
+    }, "#")
+end
+
+function App:_refreshLoaderState()
+    local now = os.clock()
+    local active = self.loader.active
+    local signature
+    local progressValue
+
+    if active then
+        progressValue = tonumber(active.progressValue)
+        if progressValue == nil then
+            active.progressCounter = ((active.progressCounter or 0) + ((active.speed or 1.0) * (active.closeWhenIdle == true and 2 or 1.2))) % 100
+        else
+            active.progressCounter = math.max(0, math.min(100, progressValue))
+        end
+        if active.pendingClose == true and now >= (active.minVisibleUntil or 0) then
+            self:_closeLoaderDialog(active.handle)
+            self.loader.active = nil
+            active = nil
+        elseif active.closeWhenIdle == true
+            and now >= (active.minVisibleUntil or 0)
+            and self:_loaderBusyState() ~= true
+            and now >= (active.fallbackCloseAt or 0) then
+            self:_closeLoaderDialog(active.handle)
+            self.loader.active = nil
+            active = nil
+        end
+    end
+
+    self.loader.status = nil
+    if active then
+        self:_syncLoaderDialog()
+    end
+    signature = self:_loaderSignature(active)
+    self.loader.signature = signature
+end
+
+function App:_loaderSpeed(speed)
+    local value = tonumber(speed)
+
+    if value ~= nil and value > 0 then
+        return value
+    end
+
+    return self.loaderSpeed.DEFAULT
+end
+
+function App:showLoader(options)
+    local opts = type(options) == "table" and options or {}
+    local now = os.clock()
+    local kind = opts.kind or "progress"
+    local defaultTitle = kind == "save" and "Saving" or "Loading"
+    local defaultMessage = kind == "save" and "Saving settings." or "Loading from flight controller."
+
+    self.loader.active = {
+        kind = kind,
+        title = self:_loaderText(opts.title, defaultTitle),
+        message = self:_loaderText(opts.message, defaultMessage),
+        detail = self:_loaderText(opts.detail, ""),
+        speed = self:_loaderSpeed(opts.speed),
+        modal = opts.modal ~= false,
+        closeWhenIdle = opts.closeWhenIdle ~= false,
+        createdAt = now,
+        minVisibleUntil = now + (tonumber(opts.minVisibleFor) or LOADER_MIN_VISIBLE),
+        fallbackCloseAt = now + (tonumber(opts.fallbackCloseAfter) or LOADER_FALLBACK_CLOSE),
+        pendingClose = false,
+        debug = opts.debug ~= false,
+        progressCounter = 0,
+        progressValue = tonumber(opts.progressValue)
+    }
+    self.loader.active.handle = self:_openLoaderDialog(
+        self.loader.active.title,
+        self:_loaderMessage(self.loader.active)
+    )
+    self:_refreshLoaderState()
+    return self.loader.active
+end
+
+function App:updateLoader(options)
+    local opts = type(options) == "table" and options or {}
+    local active = self.loader.active
+
+    if active == nil then
+        return self:showLoader(opts)
+    end
+
+    if opts.title ~= nil then
+        active.title = self:_loaderText(opts.title, active.title)
+    end
+    if opts.message ~= nil then
+        active.message = self:_loaderText(opts.message, active.message)
+    end
+    if opts.detail ~= nil then
+        active.detail = self:_loaderText(opts.detail, active.detail)
+    end
+    if opts.speed ~= nil then
+        active.speed = self:_loaderSpeed(opts.speed)
+    end
+    if opts.closeWhenIdle ~= nil then
+        active.closeWhenIdle = opts.closeWhenIdle == true
+    end
+    if opts.progressValue ~= nil then
+        active.progressValue = tonumber(opts.progressValue)
+    end
+
+    self:_refreshLoaderState()
+    return active
+end
+
+function App:clearLoader(force)
+    local active = self.loader.active
+    local now = os.clock()
+
+    if active == nil then
+        self:_refreshLoaderState()
+        return true
+    end
+
+    if force == true or now >= (active.minVisibleUntil or 0) then
+        self:_closeLoaderDialog(active.handle)
+        self.loader.active = nil
+    else
+        active.pendingClose = true
+    end
+
+    self:_refreshLoaderState()
+    return true
+end
+
+function App:isLoaderActive()
+    self:_refreshLoaderState()
+    return self.loader.active ~= nil
 end
 
 function App:_headerNavY()
@@ -1155,6 +1552,7 @@ function App:wakeup()
     self:_rebuildFormIfNeeded()
     self:_runNodeHook(self.currentNode, "wakeup")
     self:_updateValueFields()
+    self:_refreshLoaderState()
 end
 
 function App:paint()
@@ -1163,21 +1561,17 @@ function App:paint()
     local breadcrumb = self:_breadcrumbText()
     local width
 
-    if breadcrumb == nil or not (lcd and lcd.drawText and lcd.font) then
-        return
+    if breadcrumb ~= nil and lcd and lcd.drawText and lcd.font then
+        width = self:_windowSize()
+        breadcrumb = self:_fitTextToWidth(breadcrumb, math.max(40, width - 8))
+        if breadcrumb ~= "" then
+            lcd.font(FONT_XXS or FONT_XS or FONT_STD)
+            if lcd.color and lcd.RGB then
+                lcd.color(lcd.RGB(170, 170, 170))
+            end
+            lcd.drawText(0, self:_headerBreadcrumbY(), breadcrumb)
+        end
     end
-
-    width = self:_windowSize()
-    breadcrumb = self:_fitTextToWidth(breadcrumb, math.max(40, width - 8))
-    if breadcrumb == "" then
-        return
-    end
-
-    lcd.font(FONT_XXS or FONT_XS or FONT_STD)
-    if lcd.color and lcd.RGB then
-        lcd.color(lcd.RGB(170, 170, 170))
-    end
-    lcd.drawText(0, self:_headerBreadcrumbY(), breadcrumb)
 end
 
 function App:event(category, value, x, y)
@@ -1189,6 +1583,9 @@ function App:event(category, value, x, y)
         end
         return self:_requestExit()
     end
+    if self.loader and self.loader.active and self.loader.active.modal == true then
+        return true
+    end
     if self:_runNodeHook(self.currentNode, "event", category, value, x, y) == true then
         return true
     end
@@ -1197,6 +1594,12 @@ end
 
 function App:onActivate()
     DIRTY_OWNER = self
+    if self.loader.active then
+        self:_closeLoaderDialog(self.loader.active.handle)
+    end
+    self.loader.active = nil
+    self.loader.status = nil
+    self.loader.signature = nil
     self:_openRoot()
 end
 
@@ -1204,6 +1607,12 @@ function App:onDeactivate()
     if DIRTY_OWNER == self then
         DIRTY_OWNER = nil
     end
+    if self.loader.active then
+        self:_closeLoaderDialog(self.loader.active.handle)
+    end
+    self.loader.active = nil
+    self.loader.status = nil
+    self.loader.signature = nil
     self:_closeNode(self.currentNode)
     safeFormClear()
     self:_clearFormRefs()
@@ -1215,6 +1624,12 @@ function App:close()
     if DIRTY_OWNER == self then
         DIRTY_OWNER = nil
     end
+    if self.loader.active then
+        self:_closeLoaderDialog(self.loader.active.handle)
+    end
+    self.loader.active = nil
+    self.loader.status = nil
+    self.loader.signature = nil
     self:_closeNode(self.currentNode)
     safeFormClear()
     self:_clearFormRefs()
