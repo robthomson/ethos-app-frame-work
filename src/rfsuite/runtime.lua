@@ -33,7 +33,8 @@ runtime.config = {
         general = {
             debugMode = false,
             enableProfiling = false,
-            iconsize = 1
+            iconsize = 1,
+            shortcuts_mixed_in = true
         },
         developer = {
             memstats = false,
@@ -69,7 +70,9 @@ runtime.config = {
             postalerton = false,
             postalertperiod = 60,
             postalertinterval = 10
-        }
+        },
+        shortcuts = {},
+        menulastselected = {}
     },
     supportedMspApiVersion = {"12.08", "12.09", "12.10"},
     msp = {

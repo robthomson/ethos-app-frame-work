@@ -40,6 +40,16 @@ local function loadLuaTable(path)
     return value
 end
 
+local function loadShortcutsModule()
+    local mod = select(1, loadLuaTable("app/lib/shortcuts.lua"))
+
+    if type(mod) == "table" then
+        return mod
+    end
+
+    return nil
+end
+
 local function isKey(value, name)
     return _G[name] ~= nil and value == _G[name]
 end
@@ -1119,6 +1129,11 @@ end
 
 function App:_loadRootNode()
     local node, err = loadLuaTable(MENU_ROOT_PATH)
+    local shortcuts
+    local shortcutItems
+    local merged
+    local i
+    local insertAt
     if not node then
         self.rootLoadError = tostring(err)
         return {
@@ -1133,6 +1148,33 @@ function App:_loadRootNode()
 
     self.rootLoadError = nil
     node.breadcrumb = nil
+
+    shortcuts = loadShortcutsModule()
+    if shortcuts and type(shortcuts.buildRootItems) == "function" then
+        shortcutItems = select(2, pcall(shortcuts.buildRootItems, self.framework))
+        if type(shortcutItems) == "table" and #shortcutItems > 0 then
+            merged = {}
+            insertAt = 0
+
+            for i = 1, #(node.items or {}) do
+                merged[#merged + 1] = node.items[i]
+                if node.items[i].group == "configuration" then
+                    insertAt = #merged
+                end
+            end
+
+            if insertAt < 1 then
+                insertAt = #merged
+            end
+
+            for i = #shortcutItems, 1, -1 do
+                table.insert(merged, insertAt + 1, shortcutItems[i])
+            end
+
+            node.items = merged
+        end
+    end
+
     return node
 end
 
@@ -1273,7 +1315,11 @@ function App:_goBack()
     self:_closeNode(self.currentNode)
     self.pathStack[#self.pathStack] = nil
     self.currentNodeSource = previous.source
-    self.currentNode = previous.node
+    if previous.source == MENU_ROOT_PATH then
+        self.currentNode = self:_loadRootNode()
+    else
+        self.currentNode = previous.node
+    end
     self:setPageDirty(false)
     self:_invalidateForm()
     return true
@@ -1455,8 +1501,9 @@ function App:_buildGridButtons(items)
     for _, item in ipairs(items) do
         if item.kind == "menu" or item.kind == "page" then
             buttonIndex = buttonIndex + 1
+            local treatAsMixedShortcut = (item._mixedShortcut == true)
 
-            if type(item.group) == "string" and item.group ~= "" and item.group ~= activeGroup then
+            if (not treatAsMixedShortcut) and type(item.group) == "string" and item.group ~= "" and item.group ~= activeGroup then
                 activeGroup = item.group
                 lc = 0
                 if type(item.groupTitle) == "string" and item.groupTitle ~= "" and not (self.currentNodeSource == MENU_ROOT_PATH and buttonIndex == 1) then
