@@ -40,7 +40,8 @@ runtime.config = {
             taskprofiler = false,
             apiversion = 2,
             logmsp = false,
-            loglevel = "info"
+            loglevel = "info",
+            mspexpbytes = 8
         },
         events = {
             armflags = true,
