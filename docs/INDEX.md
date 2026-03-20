@@ -33,6 +33,11 @@ Learn the architecture and improvements:
    - Memory & CPU optimization strategies
    - Best practices and patterns
 
+3. **[MSP_PAGE_LAYOUTS.md](./MSP_PAGE_LAYOUTS.md)** - MSP page layout patterns
+   - When to use `rows`
+   - When to use `matrix`
+   - Example module based on PID Bandwidth
+
 ---
 
 ## 🛠️ Building Features (1-4 hours per step)
@@ -214,6 +219,7 @@ ethos-app-frame-work/
 | ARCHITECTURE.md | 14KB | 30 min | Design & principles |
 | BEFORE_AFTER.md | 20KB | 25 min | Comparison & motivation |
 | IMPLEMENTATION.md | 18KB | 3-4 hours | Step-by-step build |
+| MSP_PAGE_LAYOUTS.md | 3KB | 5 min | MSP page layout patterns |
 | **TOTAL** | **94KB** | **~5 hours** | **Complete system** |
 
 ---

@@ -7526,17 +7526,35 @@
           "needs_translation": false,
           "translation": "P"
         },
+        "pitch_full": {
+          "english": "Pitch",
+          "max_length": 5,
+          "needs_translation": false,
+          "translation": "Pitch"
+        },
         "roll": {
           "english": "R",
           "max_length": 1,
           "needs_translation": false,
           "translation": "R"
         },
+        "roll_full": {
+          "english": "Roll",
+          "max_length": 4,
+          "needs_translation": false,
+          "translation": "Roll"
+        },
         "yaw": {
           "english": "Y",
           "max_length": 1,
           "needs_translation": false,
           "translation": "Y"
+        },
+        "yaw_full": {
+          "english": "Yaw",
+          "max_length": 3,
+          "needs_translation": false,
+          "translation": "Yaw"
         }
       },
       "profile_pidcontroller": {

@@ -31,34 +31,27 @@ return MspPage.create({
         {name = "PID_PROFILE", rebuildOnWrite = true}
     },
     layout = {
-        kind = "rows",
+        kind = "matrix",
+        rowLabelWidth = "46%",
+        rowLabelAlign = "left",
+        columnAlign = "right",
+        slotGap = "18px",
+        rightPadding = "12px",
         rows = {
-            {
-                t = "@i18n(app.modules.profile_autolevel.acro_trainer)@",
-                labelWidth = "46%",
-                slotGap = 18,
-                cells = {
-                    {t = "@i18n(app.modules.profile_autolevel.gain)@", apikey = "trainer_gain"},
-                    {t = "@i18n(app.modules.profile_autolevel.max)@", apikey = "trainer_angle_limit"}
-                }
-            },
-            {
-                t = "@i18n(app.modules.profile_autolevel.angle_mode)@",
-                labelWidth = "46%",
-                slotGap = 18,
-                cells = {
-                    {t = "@i18n(app.modules.profile_autolevel.gain)@", apikey = "angle_level_strength"},
-                    {t = "@i18n(app.modules.profile_autolevel.max)@", apikey = "angle_level_limit"}
-                }
-            },
-            {
-                t = "@i18n(app.modules.profile_autolevel.horizon_mode)@",
-                labelWidth = "46%",
-                slotGap = 18,
-                cells = {
-                    {t = "@i18n(app.modules.profile_autolevel.gain)@", apikey = "horizon_level_strength", width = "34%"}
-                }
-            }
+            {id = "acro", t = "@i18n(app.modules.profile_autolevel.acro_trainer)@"},
+            {id = "angle", t = "@i18n(app.modules.profile_autolevel.angle_mode)@"},
+            {id = "horizon", t = "@i18n(app.modules.profile_autolevel.horizon_mode)@"}
+        },
+        columns = {
+            {id = "gain", t = "@i18n(app.modules.profile_autolevel.gain)@"},
+            {id = "max", t = "@i18n(app.modules.profile_autolevel.max)@"}
+        },
+        fields = {
+            {row = "acro", column = "gain", apikey = "trainer_gain"},
+            {row = "acro", column = "max", apikey = "trainer_angle_limit"},
+            {row = "angle", column = "gain", apikey = "angle_level_strength"},
+            {row = "angle", column = "max", apikey = "angle_level_limit"},
+            {row = "horizon", column = "gain", apikey = "horizon_level_strength"}
         }
     }
 })

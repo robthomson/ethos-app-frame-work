@@ -31,38 +31,35 @@ return MspPage.create({
         {name = "PID_PROFILE", rebuildOnWrite = true}
     },
     layout = {
-        kind = "rows",
+        kind = "matrix",
+        rowLabelWidth = "28%",
+        rowLabelAlign = "left",
+        columnAlign = "right",
+        columnWidth = "112px",
+        columnPack = "right",
+        fieldWidth = "120px",
+        slotGap = "12px",
+        rightPadding = "12px",
         rows = {
-            {
-                t = "@i18n(app.modules.profile_pidbandwidth.name)@",
-                labelWidth = "28%",
-                slotGap = 14,
-                cells = {
-                    {t = "@i18n(app.modules.profile_pidbandwidth.roll)@", apikey = "gyro_cutoff_0", fieldWidth = "80px"},
-                    {t = "@i18n(app.modules.profile_pidbandwidth.pitch)@", apikey = "gyro_cutoff_1", fieldWidth = "80px"},
-                    {t = "@i18n(app.modules.profile_pidbandwidth.yaw)@", apikey = "gyro_cutoff_2", fieldWidth = "80px"}
-                }
-            },
-            {
-                t = "@i18n(app.modules.profile_pidbandwidth.dterm_cutoff)@",
-                labelWidth = "28%",
-                slotGap = 14,
-                cells = {
-                    {t = "@i18n(app.modules.profile_pidbandwidth.roll)@", apikey = "dterm_cutoff_0", fieldWidth = "80px"},
-                    {t = "@i18n(app.modules.profile_pidbandwidth.pitch)@", apikey = "dterm_cutoff_1", fieldWidth = "80px"},
-                    {t = "@i18n(app.modules.profile_pidbandwidth.yaw)@", apikey = "dterm_cutoff_2", fieldWidth = "80px"}
-                }
-            },
-            {
-                t = "@i18n(app.modules.profile_pidbandwidth.bterm_cutoff)@",
-                labelWidth = "28%",
-                slotGap = 14,
-                cells = {
-                    {t = "@i18n(app.modules.profile_pidbandwidth.roll)@", apikey = "bterm_cutoff_0", fieldWidth = "80px"},
-                    {t = "@i18n(app.modules.profile_pidbandwidth.pitch)@", apikey = "bterm_cutoff_1", fieldWidth = "80px"},
-                    {t = "@i18n(app.modules.profile_pidbandwidth.yaw)@", apikey = "bterm_cutoff_2", fieldWidth = "80px"}
-                }
-            }
+            {id = "gyro", t = "@i18n(app.modules.profile_pidbandwidth.name)@"},
+            {id = "dterm", t = "@i18n(app.modules.profile_pidbandwidth.dterm_cutoff)@"},
+            {id = "bterm", t = "@i18n(app.modules.profile_pidbandwidth.bterm_cutoff)@"}
+        },
+        columns = {
+            {id = "roll", t = "@i18n(app.modules.profile_pidbandwidth.roll_full)@"},
+            {id = "pitch", t = "@i18n(app.modules.profile_pidbandwidth.pitch_full)@"},
+            {id = "yaw", t = "@i18n(app.modules.profile_pidbandwidth.yaw_full)@"}
+        },
+        fields = {
+            {row = "gyro", column = "roll", apikey = "gyro_cutoff_0"},
+            {row = "gyro", column = "pitch", apikey = "gyro_cutoff_1"},
+            {row = "gyro", column = "yaw", apikey = "gyro_cutoff_2"},
+            {row = "dterm", column = "roll", apikey = "dterm_cutoff_0"},
+            {row = "dterm", column = "pitch", apikey = "dterm_cutoff_1"},
+            {row = "dterm", column = "yaw", apikey = "dterm_cutoff_2"},
+            {row = "bterm", column = "roll", apikey = "bterm_cutoff_0"},
+            {row = "bterm", column = "pitch", apikey = "bterm_cutoff_1"},
+            {row = "bterm", column = "yaw", apikey = "bterm_cutoff_2"}
         }
     }
 })

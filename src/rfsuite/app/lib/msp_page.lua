@@ -800,6 +800,8 @@ local function prepareLayout(node)
     return true
 end
 
+local resolveDimension
+
 local function matrixRowKey(row, index)
     return tostring((type(row) == "table" and (row.id or row.label)) or index)
 end
@@ -810,7 +812,8 @@ end
 
 local function matrixStartX(node, app)
     local labels = node.state.labels or {}
-    local rowLabelWidth = tonumber(node.spec.layout and node.spec.layout.rowLabelWidth) or 0.34
+    local width = app:_windowSize()
+    local rowLabelWidth = resolveDimension(node.spec.layout and node.spec.layout.rowLabelWidth, width) or math.floor(width * 0.34)
     local index
     local maxWidth = 0
 
@@ -818,7 +821,33 @@ local function matrixStartX(node, app)
         maxWidth = math.max(maxWidth, measureTextWidth(labels[index].t or ""))
     end
 
-    return math.max(math.floor(app:_windowSize() * rowLabelWidth), maxWidth + 18)
+    return math.max(rowLabelWidth, maxWidth + 18)
+end
+
+local function matrixRowLabelPos(node, app, row)
+    local rowH = app.radio.navbuttonHeight or 30
+    local rowY = app.radio.linePaddingTop or 0
+    local startX = matrixStartX(node, app)
+    local labelText = tostring((type(row) == "table" and (row.t or row.title)) or "")
+    local labelWidth = measureTextWidth(labelText)
+    local align = tostring((node.spec.layout and node.spec.layout.rowLabelAlign) or "left")
+    local inset = resolveDimension(node.spec.layout and node.spec.layout.rowLabelPadding, startX) or 0
+    local x = 0
+
+    if align == "right" then
+        x = math.max(0, startX - labelWidth - inset)
+    elseif align == "center" then
+        x = math.max(0, math.floor((startX - labelWidth) / 2))
+    else
+        x = inset
+    end
+
+    return {
+        x = x,
+        y = rowY,
+        w = math.max(0, startX - x),
+        h = rowH
+    }
 end
 
 local function matrixFieldLookup(fields)
@@ -841,46 +870,114 @@ local function matrixFieldLookup(fields)
     return lookup
 end
 
-local function buildMatrixHeader(line, node, app, columns)
+local function matrixMetrics(node, app, columns)
     local width = app:_windowSize()
-    local rowH = app.radio.navbuttonHeight or 30
-    local rowY = app.radio.linePaddingTop or 0
-    local gap = tonumber(node.spec.layout and node.spec.layout.slotGap) or 10
-    local rightPadding = tonumber(node.spec.layout and node.spec.layout.rightPadding) or 5
+    local gap = resolveDimension(node.spec.layout and node.spec.layout.slotGap, width) or 10
+    local rightPadding = resolveDimension(node.spec.layout and node.spec.layout.rightPadding, width) or 12
     local startX = matrixStartX(node, app)
     local count = math.max(1, #columns)
-    local cellW = math.floor((width - startX - rightPadding - ((count - 1) * gap)) / count)
+    local availableW = math.max(0, width - startX - rightPadding)
+    local configuredCellW = resolveDimension(node.spec.layout and node.spec.layout.columnWidth, availableW)
+    local cellW
+    local usedW
+    local blockX
+    local pack
+
+    if configuredCellW ~= nil and configuredCellW > 0 then
+        cellW = math.max(0, configuredCellW)
+        usedW = (cellW * count) + ((count - 1) * gap)
+
+        if usedW > availableW then
+            cellW = math.floor((availableW - ((count - 1) * gap)) / count)
+            cellW = math.max(0, cellW)
+            blockX = startX
+        else
+            pack = tostring((node.spec.layout and node.spec.layout.columnPack) or "right")
+            if pack == "left" then
+                blockX = startX
+            elseif pack == "center" then
+                blockX = startX + math.floor((availableW - usedW) / 2)
+            else
+                blockX = width - rightPadding - usedW
+            end
+        end
+    else
+        cellW = math.floor((availableW - ((count - 1) * gap)) / count)
+        cellW = math.max(0, cellW)
+        blockX = startX
+    end
+
+    return {
+        width = width,
+        gap = gap,
+        rightPadding = rightPadding,
+        startX = startX,
+        count = count,
+        cellW = cellW,
+        blockX = blockX
+    }
+end
+
+local function buildMatrixHeader(line, node, app, columns)
+    local rowH = app.radio.navbuttonHeight or 30
+    local rowY = app.radio.linePaddingTop or 0
+    local metrics = matrixMetrics(node, app, columns)
+    local align = tostring((node.spec.layout and node.spec.layout.columnAlign) or "center")
     local index
     local column
     local cellX
+    local text
+    local textWidth
+    local textX
 
     for index = 1, #columns do
         column = columns[index]
-        cellX = startX + ((index - 1) * (cellW + gap))
-        form.addStaticText(line, {x = cellX, y = rowY, w = cellW, h = rowH}, tostring(column.t or column.id or ""))
+        cellX = metrics.blockX + ((index - 1) * (metrics.cellW + metrics.gap))
+        text = tostring(column.t or column.id or "")
+        textWidth = measureTextWidth(text)
+        if align == "right" then
+            textX = math.max(cellX, cellX + metrics.cellW - textWidth)
+        elseif align == "left" then
+            textX = cellX
+        else
+            textX = math.max(cellX, cellX + math.floor((metrics.cellW - textWidth) / 2))
+        end
+        form.addStaticText(line, {x = textX, y = rowY, w = math.min(metrics.cellW, textWidth + 2), h = rowH}, text)
     end
 end
 
 local function buildMatrixRow(line, node, app, row, columns, rowFields)
-    local width = app:_windowSize()
     local rowH = app.radio.navbuttonHeight or 30
     local rowY = app.radio.linePaddingTop or 0
-    local gap = tonumber(node.spec.layout and node.spec.layout.slotGap) or 10
-    local rightPadding = tonumber(node.spec.layout and node.spec.layout.rightPadding) or 5
-    local startX = matrixStartX(node, app)
-    local count = math.max(1, #columns)
-    local cellW = math.floor((width - startX - rightPadding - ((count - 1) * gap)) / count)
+    local metrics = matrixMetrics(node, app, columns)
     local index
     local column
     local field
     local cellX
+    local controlW
+    local controlX
+    local fieldAlign
+
+    form.addStaticText(line, matrixRowLabelPos(node, app, row), tostring((type(row) == "table" and (row.t or row.title)) or ""))
 
     for index = 1, #columns do
         column = columns[index]
         field = rowFields and rowFields[matrixColumnKey(column, index)] or nil
         if field then
-            cellX = startX + ((index - 1) * (cellW + gap))
-            buildControlAtPosition(line, field, {x = cellX, y = rowY, w = cellW, h = rowH})
+            cellX = metrics.blockX + ((index - 1) * (metrics.cellW + metrics.gap))
+            controlW = resolveDimension(field.fieldWidth or column.fieldWidth or (node.spec.layout and node.spec.layout.fieldWidth), metrics.cellW) or metrics.cellW
+            controlW = math.max(0, math.min(metrics.cellW, controlW))
+            fieldAlign = tostring(field.fieldAlign or column.fieldAlign or (node.spec.layout and node.spec.layout.fieldAlign) or "right")
+
+            if fieldAlign == "left" then
+                controlX = cellX
+            elseif fieldAlign == "center" then
+                controlX = cellX + math.floor((metrics.cellW - controlW) / 2)
+            else
+                controlX = cellX + metrics.cellW - controlW
+            end
+
+            buildControlAtPosition(line, field, {x = controlX, y = rowY, w = controlW, h = rowH})
         end
     end
 end
@@ -900,7 +997,7 @@ relinkFlexRows = function(rows, fields)
     return rows
 end
 
-local function resolveDimension(value, percentBasis)
+resolveDimension = function(value, percentBasis)
     local numeric
     local percent
 
@@ -1338,7 +1435,7 @@ function MspPage.create(spec)
 
                 for index = 1, #labels do
                     label = labels[index]
-                    line = form.addLine(tostring(label.t or ""))
+                    line = form.addLine("")
                     buildMatrixRow(line, self, app, label, columns, rowLookup[matrixRowKey(label, index)])
                 end
                 return
