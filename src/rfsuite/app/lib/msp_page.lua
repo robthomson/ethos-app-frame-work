@@ -234,7 +234,12 @@ local function currentPidProfile(node)
         return nil
     end
 
-    return math.floor(value)
+    value = math.floor(value)
+    if value < 1 then
+        return nil
+    end
+
+    return value
 end
 
 local function currentRateProfile(node)
@@ -254,7 +259,12 @@ local function currentRateProfile(node)
         return nil
     end
 
-    return math.floor(value)
+    value = math.floor(value)
+    if value < 1 then
+        return nil
+    end
+
+    return value
 end
 
 local function currentBatteryProfile(node)
@@ -274,7 +284,12 @@ local function currentBatteryProfile(node)
         return nil
     end
 
-    return math.floor(value)
+    value = math.floor(value)
+    if value < 1 then
+        return nil
+    end
+
+    return value
 end
 
 local function trackedProfileValue(node, kind)
@@ -309,7 +324,11 @@ local function updateDynamicTitle(node)
 
     if node.title ~= newTitle then
         node.title = newTitle
-        node.app:_invalidateForm()
+        if node.app and node.app.setHeaderTitle then
+            node.app:setHeaderTitle(newTitle)
+        else
+            node.app:_invalidateForm()
+        end
     end
 end
 
@@ -359,9 +378,17 @@ local function handleProfileChangeReload(node)
         previous = node.state.profileWatch[kind]
 
         if previous == nil then
-            node.state.profileWatch[kind] = current
+            if current ~= nil then
+                node.state.profileWatch[kind] = current
+                if node.spec.titleProfileSuffix == kind then
+                    updateDynamicTitle(node)
+                end
+            end
         elseif current ~= nil and current ~= previous then
             node.state.profileWatch[kind] = current
+            if node.spec.titleProfileSuffix == kind then
+                updateDynamicTitle(node)
+            end
             if (kind == "pid" and node.spec.refreshOnProfileChange == true) or
                 (kind == "rate" and node.spec.refreshOnRateChange == true) or
                 (kind == "battery" and node.spec.refreshOnBatteryProfileChange == true) then
@@ -673,17 +700,12 @@ end
 local function refreshBuiltControls(node)
     local index
     local field
-    local updated = false
 
     for index = 1, #(node.state.fields or {}) do
         field = node.state.fields[index]
         if field and field.control then
-            updated = applyControlValue(field.control, field.value) or updated
+            applyControlValue(field.control, field.value)
         end
-    end
-
-    if updated ~= true then
-        node.app:_invalidateForm()
     end
 end
 
@@ -1248,8 +1270,8 @@ local function triggerEepromWrite(node)
 
     if node.spec.eepromWrite ~= true then
         node.state.saving = false
+        node.state.error = nil
         node.app.ui.clearProgressDialog(true)
-        node.app:_invalidateForm()
         return true
     end
 
@@ -1268,7 +1290,6 @@ local function triggerEepromWrite(node)
             node.state.saving = false
             node.state.error = nil
             node.app.ui.clearProgressDialog(true)
-            node.app:_invalidateForm()
         end,
         onError = function(_, err)
             node.state.saving = false
@@ -1389,6 +1410,7 @@ function MspPage.create(spec)
             prepareLayout(node)
         end
         primeProfileWatchState(node)
+        updateDynamicTitle(node)
 
         function node:buildForm(app)
             local groupedFields = {}

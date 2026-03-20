@@ -196,6 +196,7 @@ function App:_clearFormRefs()
     self.valueFields = {}
     self.buttonFields = {}
     self.navFields = {}
+    self.headerTitleField = nil
 end
 
 function App:_invalidateForm()
@@ -2022,9 +2023,33 @@ function App:_addHeader(node)
         headerTitle = node.headerTitle or headerTitle
     end
     if type(headerTitle) == "string" and headerTitle ~= "" then
-        form.addStaticText(line, self:_headerTitlePos(), headerTitle)
+        self.headerTitleField = form.addStaticText(line, self:_headerTitlePos(), headerTitle)
     end
     self:_addNavigationButtons()
+end
+
+function App:setHeaderTitle(title)
+    local headerTitle = tostring(title or "")
+    local node = self.currentNode
+    local ok = false
+
+    if type(node) == "table" then
+        if self.currentNodeSource == MENU_ROOT_PATH then
+            node.headerTitle = headerTitle
+        else
+            node.title = headerTitle
+        end
+    end
+
+    if self.headerTitleField and self.headerTitleField.value then
+        ok = pcall(self.headerTitleField.value, self.headerTitleField, headerTitle)
+    end
+
+    if ok ~= true then
+        self:_invalidateForm()
+    end
+
+    return true
 end
 
 function App:_valuePos()
