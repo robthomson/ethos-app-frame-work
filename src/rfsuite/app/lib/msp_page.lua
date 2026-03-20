@@ -1197,13 +1197,24 @@ local function buildFlexRow(line, node, app, row)
 end
 
 local function finishRead(node)
+    local currentBuildCount = node.app.formBuildCount or 0
+    local hasBuiltForm = (node.state.lastBuiltFormCount or 0) > 0
+
     prepareLayout(node)
     node.state.loaded = true
     node.state.loading = false
     node.state.error = nil
+    node.state.pendingLoaderClose = true
+    if hasBuiltForm == true then
+        node.state.pendingLoaderCloseBuild = currentBuildCount
+    else
+        node.state.pendingLoaderCloseBuild = currentBuildCount + 1
+    end
     updateDynamicTitle(node)
     refreshBuiltControls(node)
-    node.app.ui.clearProgressDialog(true)
+    if hasBuiltForm ~= true then
+        node.app:_invalidateForm()
+    end
 end
 
 local function failRead(node, reason)
@@ -1271,7 +1282,11 @@ local function triggerEepromWrite(node)
     if node.spec.eepromWrite ~= true then
         node.state.saving = false
         node.state.error = nil
-        node.app.ui.clearProgressDialog(true)
+        if node.app.requestLoaderClose then
+            node.app:requestLoaderClose()
+        else
+            node.app.ui.clearProgressDialog(true)
+        end
         return true
     end
 
@@ -1289,7 +1304,11 @@ local function triggerEepromWrite(node)
         onReply = function()
             node.state.saving = false
             node.state.error = nil
-            node.app.ui.clearProgressDialog(true)
+            if node.app.requestLoaderClose then
+                node.app:requestLoaderClose()
+            else
+                node.app.ui.clearProgressDialog(true)
+            end
         end,
         onError = function(_, err)
             node.state.saving = false
@@ -1395,7 +1414,10 @@ function MspPage.create(spec)
                 loaded = false,
                 saving = false,
                 error = nil,
-                needsInitialLoad = true
+                needsInitialLoad = true,
+                pendingLoaderClose = false,
+                pendingLoaderCloseBuild = 0,
+                lastBuiltFormCount = 0
             }
         }
         local navKey
@@ -1426,6 +1448,8 @@ function MspPage.create(spec)
             local line
             local labelId
             local rowLookup
+
+            self.state.lastBuiltFormCount = app.formBuildCount or 0
 
             if self.state.error then
                 line = form.addLine("Status")
@@ -1519,17 +1543,15 @@ function MspPage.create(spec)
             prepareLayout(self)
 
             self.state.loading = true
-            self.state.loaded = false
             self.state.error = nil
-
-            self.app:_invalidateForm()
 
             if shouldShowLoader == true then
                 beginLoader(self, {
                     kind = "progress",
                     title = self.baseTitle,
                     message = "Loading values.",
-                    closeWhenIdle = true,
+                    closeWhenIdle = false,
+                    focusMenuOnClose = true,
                     modal = true
                 })
             end
@@ -1583,7 +1605,7 @@ function MspPage.create(spec)
                 kind = "save",
                 title = self.baseTitle,
                 message = "Saving values.",
-                closeWhenIdle = true,
+                closeWhenIdle = false,
                 modal = true
             })
 
@@ -1595,6 +1617,16 @@ function MspPage.create(spec)
                 self.state.needsInitialLoad = false
                 self:reload(true)
                 return
+            end
+
+            if self.state.pendingLoaderClose == true and self.app.formDirty ~= true and (self.app.formBuildCount or 0) >= (self.state.pendingLoaderCloseBuild or 0) then
+                self.state.pendingLoaderClose = false
+                self.state.pendingLoaderCloseBuild = 0
+                if self.app.requestLoaderClose then
+                    self.app:requestLoaderClose()
+                else
+                    self.app.ui.clearProgressDialog(true)
+                end
             end
 
             if handleProfileChangeReload(self) == true then

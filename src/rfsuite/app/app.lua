@@ -174,6 +174,7 @@ function App:init(framework)
     self.maskCache = {}
     self.maskCacheOrder = {}
     self.pageDirty = false
+    self.formBuildCount = 0
     self.mspTask = nil
     self.loader = {
         active = nil,
@@ -506,6 +507,17 @@ function App:_syncSaveButtonState()
     end
 end
 
+function App:_focusNavigationButton(key)
+    local field = self.navFields and self.navFields[key] or nil
+
+    if field and field.focus then
+        pcall(field.focus, field)
+        return true
+    end
+
+    return false
+end
+
 function App:setPageDirty(isDirty)
     self.pageDirty = isDirty == true
     self:_syncSaveButtonState()
@@ -647,6 +659,9 @@ function App:_createUiBridge()
         end,
         closeLoader = function()
             return self:clearLoader()
+        end,
+        requestLoaderClose = function()
+            return self:requestLoaderClose()
         end,
         progressDisplayIsActive = function()
             return self:isLoaderActive()
@@ -928,21 +943,35 @@ function App:_refreshLoaderState()
     local active = self.loader.active
     local signature
     local progressValue
+    local mult
+    local focusMenuOnClose = false
 
     if active then
+        mult = active.speed or 1.0
         progressValue = tonumber(active.progressValue)
-        if progressValue == nil then
-            active.progressCounter = ((active.progressCounter or 0) + ((active.speed or 1.0) * LOADER_PROGRESS_MULTIPLIER * (active.closeWhenIdle == true and 2 or 1.2))) % 100
+        if active.closeRequested == true then
+            active.progressCounter = math.min(100, (active.progressCounter or 0) + (15 * mult))
+        elseif progressValue == nil then
+            active.progressCounter = ((active.progressCounter or 0) + (mult * LOADER_PROGRESS_MULTIPLIER * (active.closeWhenIdle == true and 2 or 1.2))) % 100
         else
             active.progressCounter = math.max(0, math.min(100, progressValue))
         end
-        if active.timedOut ~= true and active.watchdogDeadline and now >= active.watchdogDeadline then
-            self:_tripLoaderWatchdog(active)
-        end
         if active.pendingClose == true and now >= (active.minVisibleUntil or 0) then
+            focusMenuOnClose = active.focusMenuOnClose == true
             self:_closeLoaderDialog(active.handle)
             self.loader.active = nil
             active = nil
+        elseif active
+            and active.closeRequested == true
+            and active.timedOut ~= true
+            and now >= (active.minVisibleUntil or 0)
+            and (active.progressCounter or 0) >= 100 then
+            focusMenuOnClose = active.focusMenuOnClose == true
+            self:_closeLoaderDialog(active.handle)
+            self.loader.active = nil
+            active = nil
+        elseif active.timedOut ~= true and active.watchdogDeadline and now >= active.watchdogDeadline then
+            self:_tripLoaderWatchdog(active)
         elseif active
             and active.timedOut ~= true
             and active.closeWhenIdle == true
@@ -958,6 +987,8 @@ function App:_refreshLoaderState()
     self.loader.status = nil
     if active then
         self:_syncLoaderDialog()
+    elseif focusMenuOnClose == true then
+        self:_focusNavigationButton("menu")
     end
     signature = self:_loaderSignature(active)
     self.loader.signature = signature
@@ -1023,6 +1054,8 @@ function App:showLoader(options)
         fallbackCloseAt = now + (tonumber(opts.fallbackCloseAfter) or LOADER_FALLBACK_CLOSE),
         watchdogDeadline = watchdogTimeout and (now + watchdogTimeout) or nil,
         pendingClose = false,
+        closeRequested = false,
+        focusMenuOnClose = opts.focusMenuOnClose == true,
         timedOut = false,
         debug = opts.debug ~= false,
         progressCounter = 0,
@@ -1084,6 +1117,7 @@ end
 function App:clearLoader(force)
     local active = self.loader.active
     local now = os.clock()
+    local focusMenuOnClose = false
 
     if active == nil then
         self:_refreshLoaderState()
@@ -1091,12 +1125,32 @@ function App:clearLoader(force)
     end
 
     if force == true or now >= (active.minVisibleUntil or 0) then
+        focusMenuOnClose = active.focusMenuOnClose == true
         self:_closeLoaderDialog(active.handle)
         self.loader.active = nil
     else
         active.pendingClose = true
     end
 
+    self:_refreshLoaderState()
+    if focusMenuOnClose == true and self.loader.active == nil then
+        self:_focusNavigationButton("menu")
+    end
+    return true
+end
+
+function App:requestLoaderClose()
+    local active = self.loader.active
+
+    if active == nil then
+        return true
+    end
+
+    active.closeRequested = true
+    active.closeWhenIdle = false
+    active.progressValue = nil
+    active.watchdogDeadline = nil
+    active.timedOut = false
     self:_refreshLoaderState()
     return true
 end
@@ -2045,10 +2099,6 @@ function App:setHeaderTitle(title)
         ok = pcall(self.headerTitleField.value, self.headerTitleField, headerTitle)
     end
 
-    if ok ~= true then
-        self:_invalidateForm()
-    end
-
     return true
 end
 
@@ -2154,6 +2204,7 @@ function App:_buildNodeForm()
 
     safeFormClear()
     self:_clearFormRefs()
+    self.formBuildCount = (self.formBuildCount or 0) + 1
 
     self:_addHeader(node)
     built, hasCustomBuilder = self:_runNodeHook(node, "buildForm")
