@@ -6563,10 +6563,58 @@
           "translation": "If you do not understand what you are doing, do not use it as bad things can happen."
         },
         "name": {
-          "english": "MSP Expermental",
+          "english": "MSP Experimental",
           "max_length": 15,
           "needs_translation": false,
-          "translation": "MSP Expermental"
+          "translation": "MSP Experimental"
+        },
+        "subtitle": {
+          "english": "MSP experimentation",
+          "max_length": 19,
+          "needs_translation": false,
+          "translation": "MSP experimentation"
+        },
+        "status_label": {
+          "english": "Status",
+          "max_length": 6,
+          "needs_translation": false,
+          "translation": "Status"
+        },
+        "loading": {
+          "english": "Loading...",
+          "max_length": 10,
+          "needs_translation": false,
+          "translation": "Loading..."
+        },
+        "waiting": {
+          "english": "Waiting...",
+          "max_length": 10,
+          "needs_translation": false,
+          "translation": "Waiting..."
+        },
+        "no_bytes": {
+          "english": "No experimental bytes returned.",
+          "max_length": 30,
+          "needs_translation": false,
+          "translation": "No experimental bytes returned."
+        },
+        "loading_values": {
+          "english": "Loading experimental values.",
+          "max_length": 28,
+          "needs_translation": false,
+          "translation": "Loading experimental values."
+        },
+        "reloading_values": {
+          "english": "Reloading experimental values.",
+          "max_length": 30,
+          "needs_translation": false,
+          "translation": "Reloading experimental values."
+        },
+        "saving_values": {
+          "english": "Saving experimental values.",
+          "max_length": 27,
+          "needs_translation": false,
+          "translation": "Saving experimental values."
         }
       },
       "msp_speed": {
@@ -6606,6 +6654,18 @@
           "needs_translation": false,
           "translation": "MSP Speed"
         },
+        "subtitle": {
+          "english": "MSP throughput tester",
+          "max_length": 21,
+          "needs_translation": false,
+          "translation": "MSP throughput tester"
+        },
+        "transport": {
+          "english": "Transport",
+          "max_length": 9,
+          "needs_translation": false,
+          "translation": "Transport"
+        },
         "retries": {
           "english": "Retries",
           "max_length": 7,
@@ -6629,6 +6689,12 @@
           "max_length": 7,
           "needs_translation": false,
           "translation": "  30S  "
+        },
+        "seconds_60": {
+          "english": "  60S  ",
+          "max_length": 7,
+          "needs_translation": false,
+          "translation": "  60S  "
         },
         "seconds_300": {
           "english": "  300S  ",
@@ -6683,6 +6749,18 @@
           "max_length": 8,
           "needs_translation": false,
           "translation": "Timeouts"
+        },
+        "other_errors": {
+          "english": "Other errors",
+          "max_length": 12,
+          "needs_translation": false,
+          "translation": "Other errors"
+        },
+        "preparing_request_loop": {
+          "english": "Preparing request loop.",
+          "max_length": 23,
+          "needs_translation": false,
+          "translation": "Preparing request loop."
         },
         "total_queries": {
           "english": "Total queries",
@@ -9003,6 +9081,36 @@
           "max_length": 30,
           "needs_translation": false,
           "translation": "No shortcut sources available."
+        },
+        "shortcuts_preferences": {
+          "english": "Shortcut preferences",
+          "max_length": 20,
+          "needs_translation": false,
+          "translation": "Shortcut preferences"
+        },
+        "shortcuts_mixed_in_mode": {
+          "english": "Mixed In Mode",
+          "max_length": 13,
+          "needs_translation": false,
+          "translation": "Mixed In Mode"
+        },
+        "shortcuts_status_label": {
+          "english": "Status",
+          "max_length": 6,
+          "needs_translation": false,
+          "translation": "Status"
+        },
+        "shortcuts_group_selected_none": {
+          "english": "No shortcut group selected.",
+          "max_length": 27,
+          "needs_translation": false,
+          "translation": "No shortcut group selected."
+        },
+        "shortcuts_limit": {
+          "english": "No more than %d shortcuts can be selected.",
+          "max_length": 43,
+          "needs_translation": false,
+          "translation": "No more than %d shortcuts can be selected."
         },
         "temperature_unit": {
           "english": "Temperature Unit",

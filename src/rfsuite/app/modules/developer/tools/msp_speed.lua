@@ -6,10 +6,10 @@
 local Page = {}
 
 local TEST_DURATIONS = {
-    {label = "30S", seconds = 30},
-    {label = "60S", seconds = 60},
-    {label = "120S", seconds = 120},
-    {label = "300S", seconds = 300}
+    {label = "@i18n(app.modules.msp_speed.seconds_30)@", seconds = 30},
+    {label = "@i18n(app.modules.msp_speed.seconds_60)@", seconds = 60},
+    {label = "@i18n(app.modules.msp_speed.seconds_120)@", seconds = 120},
+    {label = "@i18n(app.modules.msp_speed.seconds_300)@", seconds = 300}
 }
 
 local API_SEQUENCE = {
@@ -257,8 +257,8 @@ local function openDurationDialog(node)
 
     form.openDialog({
         width = nil,
-        title = "MSP Speed Test",
-        message = "Select test duration.",
+        title = "@i18n(app.modules.msp_speed.name)@",
+        message = "@i18n(app.modules.msp_speed.start_prompt)@",
         buttons = buttons,
         wakeup = function() end,
         paint = function() end,
@@ -269,8 +269,8 @@ end
 
 function Page:open(ctx)
     local node = {
-        title = ctx.item.title or "MSP Speed",
-        subtitle = ctx.item.subtitle or "MSP throughput tester",
+        title = ctx.item.title or "@i18n(app.modules.msp_speed.name)@",
+        subtitle = ctx.item.subtitle or "@i18n(app.modules.msp_speed.subtitle)@",
         breadcrumb = ctx.breadcrumb,
         navButtons = {menu = true, save = false, reload = true, tool = true, help = false},
         fields = {},
@@ -287,15 +287,15 @@ function Page:open(ctx)
             fields[key] = form.addStaticText(line, valuePos(app), initial or "-")
         end
 
-        addStat("Transport", "transport", "-")
-        addStat("Total Queries", "total", "0")
-        addStat("Successful Queries", "success", "0")
-        addStat("Retries", "retries", "0")
-        addStat("Timeouts", "timeouts", "0")
-        addStat("Other Errors", "errors", "0")
-        addStat("Min Query Time", "minTime", "-")
-        addStat("Max Query Time", "maxTime", "-")
-        addStat("Avg Query Time", "avgTime", "-")
+        addStat("@i18n(app.modules.msp_speed.transport)@", "transport", "-")
+        addStat("@i18n(app.modules.msp_speed.total_queries)@", "total", "0")
+        addStat("@i18n(app.modules.msp_speed.successful_queries)@", "success", "0")
+        addStat("@i18n(app.modules.msp_speed.retries)@", "retries", "0")
+        addStat("@i18n(app.modules.msp_speed.timeouts)@", "timeouts", "0")
+        addStat("@i18n(app.modules.msp_speed.other_errors)@", "errors", "0")
+        addStat("@i18n(app.modules.msp_speed.min_query_time)@", "minTime", "-")
+        addStat("@i18n(app.modules.msp_speed.max_query_time)@", "maxTime", "-")
+        addStat("@i18n(app.modules.msp_speed.avg_query_time)@", "avgTime", "-")
 
         self.fields = fields
         refreshFields(self)
@@ -316,9 +316,9 @@ function Page:open(ctx)
 
         self.app.ui.showLoader({
             kind = "progress",
-            title = "MSP Speed",
-            message = "Testing MSP throughput.",
-            detail = "Preparing request loop.",
+            title = "@i18n(app.modules.msp_speed.name)@",
+            message = "@i18n(app.modules.msp_speed.testing_performance)@",
+            detail = "@i18n(app.modules.msp_speed.preparing_request_loop)@",
             speed = self.app.loaderSpeed.FAST,
             closeWhenIdle = false,
             fallbackCloseAfter = math.max(self.state.duration + 2, 5),

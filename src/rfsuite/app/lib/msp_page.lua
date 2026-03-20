@@ -50,6 +50,22 @@ local function convertChoiceTable(tbl, inc)
     return values
 end
 
+local function resolveChoiceValues(field)
+    if type(field) ~= "table" then
+        return {}
+    end
+
+    if type(field.tableEthos) == "table" then
+        return field.tableEthos
+    end
+
+    if type(field.values) == "table" then
+        return field.values
+    end
+
+    return convertChoiceTable(field.table, field.tableIdxInc)
+end
+
 local function allowedByApiVersion(definition)
     if type(definition) ~= "table" then
         return true
@@ -550,9 +566,18 @@ local function applyFieldDecoration(control, field)
     local minValue
     local maxValue
     local defaultValue
+    local suffixValue
+    local choiceValues
 
     if not control then
         return
+    end
+
+    if field.type == FIELD_TYPE_CHOICE and control.values then
+        choiceValues = resolveChoiceValues(field)
+        if next(choiceValues) ~= nil then
+            control:values(choiceValues)
+        end
     end
 
     if field.decimals and control.decimals and field.type ~= FIELD_TYPE_CHOICE then
@@ -563,8 +588,16 @@ local function applyFieldDecoration(control, field)
         control:step(field.step)
     end
 
-    if field.unit and control.suffix and field.type ~= FIELD_TYPE_CHOICE then
-        control:suffix(field.unit)
+    if field.prefix and control.prefix and field.type ~= FIELD_TYPE_CHOICE then
+        control:prefix(field.prefix)
+    end
+
+    suffixValue = field.suffix
+    if suffixValue == nil then
+        suffixValue = field.unit
+    end
+    if suffixValue ~= nil and control.suffix and field.type ~= FIELD_TYPE_CHOICE then
+        control:suffix(suffixValue)
     end
 
     minValue = fieldBoundaryValue(field, field.min)
@@ -588,7 +621,7 @@ local function applyFieldDecoration(control, field)
 end
 
 local function buildChoiceField(line, pos, field)
-    local values = convertChoiceTable(field.table, field.tableIdxInc)
+    local values = resolveChoiceValues(field)
 
     return form.addChoiceField(line, pos, values,
         function()

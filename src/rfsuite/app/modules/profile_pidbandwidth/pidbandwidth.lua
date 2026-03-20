@@ -18,12 +18,14 @@ end
 local MspPage = loadMspPage()
 
 return MspPage.create({
+    title = "@i18n(app.modules.profile_pidbandwidth.name)@",
     titleProfileSuffix = "pid",
     refreshOnProfileChange = true,
     eepromWrite = true,
     help = {
-        "PID bandwidth settings from the active PID profile.",
-        "This page exercises the wrapper with a compact inline grid layout."
+        "@i18n(app.modules.profile_pidbandwidth.help_p1)@",
+        "@i18n(app.modules.profile_pidbandwidth.help_p2)@",
+        "@i18n(app.modules.profile_pidbandwidth.help_p3)@"
     },
     api = {
         {name = "PID_PROFILE", rebuildOnWrite = true}
@@ -32,33 +34,33 @@ return MspPage.create({
         kind = "rows",
         rows = {
             {
-                t = "Gyro Cutoff",
+                t = "@i18n(app.modules.profile_pidbandwidth.name)@",
                 labelWidth = "28%",
                 slotGap = 14,
                 cells = {
-                    {t = "Roll", apikey = "gyro_cutoff_0", fieldWidth = "80px"},
-                    {t = "Pitch", apikey = "gyro_cutoff_1", fieldWidth = "80px"},
-                    {t = "Yaw", apikey = "gyro_cutoff_2", fieldWidth = "80px"}
+                    {t = "@i18n(app.modules.profile_pidbandwidth.roll)@", apikey = "gyro_cutoff_0", fieldWidth = "80px"},
+                    {t = "@i18n(app.modules.profile_pidbandwidth.pitch)@", apikey = "gyro_cutoff_1", fieldWidth = "80px"},
+                    {t = "@i18n(app.modules.profile_pidbandwidth.yaw)@", apikey = "gyro_cutoff_2", fieldWidth = "80px"}
                 }
             },
             {
-                t = "D-Term Cutoff",
+                t = "@i18n(app.modules.profile_pidbandwidth.dterm_cutoff)@",
                 labelWidth = "28%",
                 slotGap = 14,
                 cells = {
-                    {t = "Roll", apikey = "dterm_cutoff_0", fieldWidth = "80px"},
-                    {t = "Pitch", apikey = "dterm_cutoff_1", fieldWidth = "80px"},
-                    {t = "Yaw", apikey = "dterm_cutoff_2", fieldWidth = "80px"}
+                    {t = "@i18n(app.modules.profile_pidbandwidth.roll)@", apikey = "dterm_cutoff_0", fieldWidth = "80px"},
+                    {t = "@i18n(app.modules.profile_pidbandwidth.pitch)@", apikey = "dterm_cutoff_1", fieldWidth = "80px"},
+                    {t = "@i18n(app.modules.profile_pidbandwidth.yaw)@", apikey = "dterm_cutoff_2", fieldWidth = "80px"}
                 }
             },
             {
-                t = "B-Term Cutoff",
+                t = "@i18n(app.modules.profile_pidbandwidth.bterm_cutoff)@",
                 labelWidth = "28%",
                 slotGap = 14,
                 cells = {
-                    {t = "Roll", apikey = "bterm_cutoff_0", fieldWidth = "80px"},
-                    {t = "Pitch", apikey = "bterm_cutoff_1", fieldWidth = "80px"},
-                    {t = "Yaw", apikey = "bterm_cutoff_2", fieldWidth = "80px"}
+                    {t = "@i18n(app.modules.profile_pidbandwidth.roll)@", apikey = "bterm_cutoff_0", fieldWidth = "80px"},
+                    {t = "@i18n(app.modules.profile_pidbandwidth.pitch)@", apikey = "bterm_cutoff_1", fieldWidth = "80px"},
+                    {t = "@i18n(app.modules.profile_pidbandwidth.yaw)@", apikey = "bterm_cutoff_2", fieldWidth = "80px"}
                 }
             }
         }

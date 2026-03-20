@@ -18,12 +18,14 @@ end
 local MspPage = loadMspPage()
 
 return MspPage.create({
+    title = "@i18n(app.modules.profile_autolevel.name)@",
     titleProfileSuffix = "pid",
     refreshOnProfileChange = true,
     eepromWrite = true,
     help = {
-        "Autolevel profile settings from PID profile data.",
-        "This page is a lightweight MSP-backed port used to validate the new page wrapper."
+        "@i18n(app.modules.profile_autolevel.help_p1)@",
+        "@i18n(app.modules.profile_autolevel.help_p2)@",
+        "@i18n(app.modules.profile_autolevel.help_p3)@"
     },
     api = {
         {name = "PID_PROFILE", rebuildOnWrite = true}
@@ -32,29 +34,29 @@ return MspPage.create({
         kind = "rows",
         rows = {
             {
-                t = "Acro Trainer",
+                t = "@i18n(app.modules.profile_autolevel.acro_trainer)@",
                 labelWidth = "46%",
                 slotGap = 18,
                 cells = {
-                    {t = "Gain", apikey = "trainer_gain"},
-                    {t = "Max", apikey = "trainer_angle_limit"}
+                    {t = "@i18n(app.modules.profile_autolevel.gain)@", apikey = "trainer_gain"},
+                    {t = "@i18n(app.modules.profile_autolevel.max)@", apikey = "trainer_angle_limit"}
                 }
             },
             {
-                t = "Angle Mode",
+                t = "@i18n(app.modules.profile_autolevel.angle_mode)@",
                 labelWidth = "46%",
                 slotGap = 18,
                 cells = {
-                    {t = "Gain", apikey = "angle_level_strength"},
-                    {t = "Max", apikey = "angle_level_limit"}
+                    {t = "@i18n(app.modules.profile_autolevel.gain)@", apikey = "angle_level_strength"},
+                    {t = "@i18n(app.modules.profile_autolevel.max)@", apikey = "angle_level_limit"}
                 }
             },
             {
-                t = "Horizon Mode",
+                t = "@i18n(app.modules.profile_autolevel.horizon_mode)@",
                 labelWidth = "46%",
                 slotGap = 18,
                 cells = {
-                    {t = "Gain", apikey = "horizon_level_strength", width = "34%"}
+                    {t = "@i18n(app.modules.profile_autolevel.gain)@", apikey = "horizon_level_strength", width = "34%"}
                 }
             }
         }
