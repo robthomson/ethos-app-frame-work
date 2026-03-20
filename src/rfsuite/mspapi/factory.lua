@@ -49,6 +49,7 @@ function factory.create(spec)
     local state
     local completeHandler = nil
     local errorHandler = nil
+    local fieldMap = nil
 
     if type(spec) ~= "table" then
         error("factory.create requires spec table")
@@ -265,8 +266,42 @@ function factory.create(spec)
         return nil
     end
 
+    local function getFieldMap()
+        local structure
+        local index
+        local field
+
+        if fieldMap ~= nil then
+            return fieldMap
+        end
+
+        fieldMap = {}
+        structure = spec.readStructure or spec.writeStructure or {}
+
+        for index = 1, #structure do
+            field = structure[index]
+            if type(field) == "table" and type(field.field) == "string" and field.field ~= "" then
+                fieldMap[field.field] = field
+            end
+        end
+
+        return fieldMap
+    end
+
+    local function describeField(fieldName)
+        if type(fieldName) ~= "string" or fieldName == "" then
+            return nil
+        end
+
+        return getFieldMap()[fieldName]
+    end
+
     local function setValue(fieldName, value)
         state.payloadData[fieldName] = value
+    end
+
+    local function clearValues()
+        state.payloadData = {}
     end
 
     local function resetWriteStatus()
@@ -306,7 +341,10 @@ function factory.create(spec)
         readComplete = readComplete,
         writeComplete = writeComplete,
         readValue = readValue,
+        getFieldMap = getFieldMap,
+        describeField = describeField,
         setValue = setValue,
+        clearValues = clearValues,
         resetWriteStatus = resetWriteStatus,
         setCompleteHandler = setCompleteHandler,
         setErrorHandler = setErrorHandler,
