@@ -21,6 +21,7 @@ local STARTUP_LOADER_MIN_VISIBLE = 0.20
 local STARTUP_ICON_BATCH = 2
 local STARTUP_SENSOR_LOST_MUTE = 6.0
 local LOADER_PROGRESS_MULTIPLIER = 2.0
+local MENU_LOADER_PROGRESS_FACTOR = 4.0
 local LOADER_TIMEOUT_MESSAGE = "Error: timed out"
 local LOADER_TIMEOUT_DETAIL = "Press close to continue."
 local DIRTY_WRAPPERS_INSTALLED = false
@@ -174,6 +175,7 @@ function App:init(framework)
     self.maskCache = {}
     self.maskCacheOrder = {}
     self.pageDirty = false
+    self.dirtySuspendDepth = 0
     self.formBuildCount = 0
     self.mspTask = nil
     self.loader = {
@@ -185,8 +187,8 @@ function App:init(framework)
         VSLOW = 0.5,
         SLOW = 0.75,
         DEFAULT = 1.0,
-        FAST = 2.0,
-        VFAST = 2.5
+        FAST = 2.3,
+        VFAST = 2.8
     }
     self.ui = self:_createUiBridge()
     self:_installDirtyCallbackWrappers()
@@ -430,7 +432,7 @@ function App:_installDirtyCallbackWrappers()
                 if type(args[setterIdx]) == "function" then
                     setter = args[setterIdx]
                     args[setterIdx] = function(...)
-                        if DIRTY_OWNER and DIRTY_OWNER.markPageDirty then
+                        if DIRTY_OWNER and (DIRTY_OWNER.dirtySuspendDepth or 0) <= 0 and DIRTY_OWNER.markPageDirty then
                             DIRTY_OWNER:markPageDirty()
                         end
                         return setter(...)
@@ -478,6 +480,7 @@ end
 function App:_canSaveNode(node)
     local ok
     local value
+    local canSave = true
 
     if type(node) ~= "table" or type(node.save) ~= "function" then
         return false
@@ -486,9 +489,14 @@ function App:_canSaveNode(node)
     if type(node.canSave) == "function" then
         ok, value = pcall(node.canSave, node, self)
         if ok then
-            return value == true
+            canSave = value == true
+        else
+            self:_reportNodeError("canSave", value)
+            return false
         end
-        self:_reportNodeError("canSave", value)
+    end
+
+    if canSave ~= true then
         return false
     end
 
@@ -528,6 +536,16 @@ function App:markPageDirty()
         return
     end
     self:setPageDirty(true)
+end
+
+function App:suspendDirtyTracking()
+    self.dirtySuspendDepth = (self.dirtySuspendDepth or 0) + 1
+    return self.dirtySuspendDepth
+end
+
+function App:resumeDirtyTracking()
+    self.dirtySuspendDepth = math.max(0, (self.dirtySuspendDepth or 0) - 1)
+    return self.dirtySuspendDepth
 end
 
 function App:_confirmAction(title, message, action)
@@ -952,7 +970,8 @@ function App:_refreshLoaderState()
         if active.closeRequested == true then
             active.progressCounter = math.min(100, (active.progressCounter or 0) + (15 * mult))
         elseif progressValue == nil then
-            active.progressCounter = ((active.progressCounter or 0) + (mult * LOADER_PROGRESS_MULTIPLIER * (active.closeWhenIdle == true and 2 or 1.2))) % 100
+            local progressFactor = (active.kind == "menu") and MENU_LOADER_PROGRESS_FACTOR or (active.closeWhenIdle == true and 2 or 1.2)
+            active.progressCounter = math.min((active.kind == "menu") and 95 or 99, (active.progressCounter or 0) + (mult * LOADER_PROGRESS_MULTIPLIER * progressFactor))
         else
             active.progressCounter = math.max(0, math.min(100, progressValue))
         end
@@ -1017,8 +1036,8 @@ function App:_showMenuNavigationLoader(title, detail, speed)
         message = "Opening menu.",
         detail = self:_loaderText(detail, ""),
         closeWhenIdle = false,
-        minVisibleFor = 0.12,
-        fallbackCloseAfter = 0.75,
+        minVisibleFor = 0.08,
+        fallbackCloseAfter = 0.60,
         watchdog = false,
         speed = resolvedSpeed or "FAST"
     })
@@ -1147,8 +1166,9 @@ function App:requestLoaderClose()
     end
 
     active.closeRequested = true
+    active.pendingClose = true
     active.closeWhenIdle = false
-    active.progressValue = nil
+    active.progressValue = 100
     active.watchdogDeadline = nil
     active.timedOut = false
     self:_refreshLoaderState()
@@ -2123,15 +2143,12 @@ function App:_addStaticLine(label, value, key)
 end
 
 function App:_buildGridButtons(items)
-    local prefsIndex = self:_getSelectedIndex(self.currentNodeSource)
     local metrics = self:_menuButtonMetrics()
     local iconsize = self:_iconsize()
     local lc = 0
     local y = 0
     local activeGroup = nil
     local buttonIndex = 0
-    local focusApplied = false
-    local firstEnabledField = nil
 
     for _, item in ipairs(items) do
         if item.kind == "menu" or item.kind == "page" then
@@ -2154,7 +2171,6 @@ function App:_buildGridButtons(items)
             local icon = nil
             local selectedIndex = buttonIndex
             local selectedItem = item
-            local enabled = self:_itemEnabled(selectedItem)
             if iconsize ~= 0 and item.image then
                 icon = self:_loadMask(item.image)
             end
@@ -2170,16 +2186,6 @@ function App:_buildGridButtons(items)
             })
 
             self.buttonFields[selectedIndex] = field
-            if field and field.enable then
-                field:enable(enabled)
-            end
-            if enabled and firstEnabledField == nil and field then
-                firstEnabledField = field
-            end
-            if selectedIndex == prefsIndex and enabled and field and field.focus then
-                field:focus()
-                focusApplied = true
-            end
 
             lc = lc + 1
             if lc == metrics.numPerRow then
@@ -2190,10 +2196,6 @@ function App:_buildGridButtons(items)
             local field = form.addStaticText(line, self:_valuePos(), self:_resolveItemValue(item))
             self.valueFields[#self.valueFields + 1] = {item = item, field = field}
         end
-    end
-
-    if focusApplied ~= true and firstEnabledField and firstEnabledField.focus then
-        firstEnabledField:focus()
     end
 end
 

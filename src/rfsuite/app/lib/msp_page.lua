@@ -701,11 +701,19 @@ local function refreshBuiltControls(node)
     local index
     local field
 
+    if node.app and node.app.suspendDirtyTracking then
+        node.app:suspendDirtyTracking()
+    end
+
     for index = 1, #(node.state.fields or {}) do
         field = node.state.fields[index]
         if field and field.control then
             applyControlValue(field.control, field.value)
         end
+    end
+
+    if node.app and node.app.resumeDirtyTracking then
+        node.app:resumeDirtyTracking()
     end
 end
 
@@ -1210,6 +1218,7 @@ local function finishRead(node)
     else
         node.state.pendingLoaderCloseBuild = currentBuildCount + 1
     end
+    node.state.resetDirtyAfterBuild = true
     updateDynamicTitle(node)
     refreshBuiltControls(node)
     if hasBuiltForm ~= true then
@@ -1217,10 +1226,40 @@ local function finishRead(node)
     end
 end
 
+local function suspendDirtyDuringLoad(node)
+    if node.state.dirtySuspended == true then
+        return
+    end
+
+    if node.app and node.app.suspendDirtyTracking then
+        node.app:suspendDirtyTracking()
+        node.state.dirtySuspended = true
+    end
+end
+
+local function resumeDirtyAfterLoad(node, clearDirty)
+    if node.state.dirtySuspended == true and node.app and node.app.resumeDirtyTracking then
+        node.app:resumeDirtyTracking()
+        node.state.dirtySuspended = false
+    end
+
+    if clearDirty == true and node.app and node.app.setPageDirty then
+        node.app:setPageDirty(false)
+    end
+end
+
+local function clearDirtyAfterBuildIfNeeded(node)
+    if node.state.resetDirtyAfterBuild == true and node.app and node.app.setPageDirty then
+        node.state.resetDirtyAfterBuild = false
+        node.app:setPageDirty(false)
+    end
+end
+
 local function failRead(node, reason)
     node.state.loading = false
     node.state.loaded = false
     node.state.error = tostring(reason or "read_failed")
+    resumeDirtyAfterLoad(node, true)
     node.app.ui.clearProgressDialog(true)
     node.app:_invalidateForm()
 end
@@ -1417,7 +1456,9 @@ function MspPage.create(spec)
                 needsInitialLoad = true,
                 pendingLoaderClose = false,
                 pendingLoaderCloseBuild = 0,
-                lastBuiltFormCount = 0
+                lastBuiltFormCount = 0,
+                resetDirtyAfterBuild = false,
+                dirtySuspended = false
             }
         }
         local navKey
@@ -1454,12 +1495,14 @@ function MspPage.create(spec)
             if self.state.error then
                 line = form.addLine("Status")
                 form.addStaticText(line, nil, tostring(self.state.error))
+                clearDirtyAfterBuildIfNeeded(self)
                 return
             end
 
             if #fields == 0 then
                 line = form.addLine("Status")
                 form.addStaticText(line, nil, self.state.loading == true and "Loading..." or "Waiting...")
+                clearDirtyAfterBuildIfNeeded(self)
                 return
             end
 
@@ -1468,6 +1511,7 @@ function MspPage.create(spec)
                     line = form.addLine(tostring(rows[index].t or rows[index].title or ""))
                     buildFlexRow(line, self, app, rows[index])
                 end
+                clearDirtyAfterBuildIfNeeded(self)
                 return
             end
 
@@ -1484,6 +1528,7 @@ function MspPage.create(spec)
                     line = form.addLine("")
                     buildMatrixRow(line, self, app, label, columns, rowLookup[matrixRowKey(label, index)])
                 end
+                clearDirtyAfterBuildIfNeeded(self)
                 return
             end
 
@@ -1523,6 +1568,8 @@ function MspPage.create(spec)
                     field.control = buildControlAtPosition(line, field, nil)
                 end
             end
+
+            clearDirtyAfterBuildIfNeeded(self)
         end
 
         function node:canSave()
@@ -1544,6 +1591,7 @@ function MspPage.create(spec)
 
             self.state.loading = true
             self.state.error = nil
+            suspendDirtyDuringLoad(self)
 
             if shouldShowLoader == true then
                 beginLoader(self, {
@@ -1622,6 +1670,7 @@ function MspPage.create(spec)
             if self.state.pendingLoaderClose == true and self.app.formDirty ~= true and (self.app.formBuildCount or 0) >= (self.state.pendingLoaderCloseBuild or 0) then
                 self.state.pendingLoaderClose = false
                 self.state.pendingLoaderCloseBuild = 0
+                resumeDirtyAfterLoad(self, true)
                 if self.app.requestLoaderClose then
                     self.app:requestLoaderClose()
                 else
