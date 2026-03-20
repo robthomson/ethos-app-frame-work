@@ -206,7 +206,7 @@ local function currentPidProfile(node)
     local value
 
     if telemetry and telemetry.getSensor then
-        value = telemetry:getSensor("pid_profile")
+        value = telemetry.getSensor("pid_profile")
     end
 
     if value == nil then
@@ -221,11 +221,71 @@ local function currentPidProfile(node)
     return math.floor(value)
 end
 
+local function currentRateProfile(node)
+    local telemetry = node.app.framework:getTask("telemetry")
+    local value
+
+    if telemetry and telemetry.getSensor then
+        value = telemetry.getSensor("rate_profile")
+    end
+
+    if value == nil then
+        value = node.app.framework.session:get("activeRateProfile", nil)
+    end
+
+    value = tonumber(value)
+    if value == nil then
+        return nil
+    end
+
+    return math.floor(value)
+end
+
+local function currentBatteryProfile(node)
+    local telemetry = node.app.framework:getTask("telemetry")
+    local value
+
+    if telemetry and telemetry.getSensor then
+        value = telemetry.getSensor("battery_profile")
+    end
+
+    if value == nil then
+        value = node.app.framework.session:get("activeBatteryProfile", nil)
+    end
+
+    value = tonumber(value)
+    if value == nil then
+        return nil
+    end
+
+    return math.floor(value)
+end
+
+local function trackedProfileValue(node, kind)
+    if kind == "rate" then
+        return currentRateProfile(node)
+    elseif kind == "battery" then
+        return currentBatteryProfile(node)
+    end
+
+    return currentPidProfile(node)
+end
+
 local function updateDynamicTitle(node)
     local newTitle = node.baseTitle
 
     if node.spec.titleProfileSuffix == "pid" then
         local profile = currentPidProfile(node)
+        if profile ~= nil then
+            newTitle = string.format("%s #%d", node.baseTitle, profile)
+        end
+    elseif node.spec.titleProfileSuffix == "rate" then
+        local profile = currentRateProfile(node)
+        if profile ~= nil then
+            newTitle = string.format("%s #%d", node.baseTitle, profile)
+        end
+    elseif node.spec.titleProfileSuffix == "battery" then
+        local profile = currentBatteryProfile(node)
         if profile ~= nil then
             newTitle = string.format("%s #%d", node.baseTitle, profile)
         end
@@ -235,6 +295,67 @@ local function updateDynamicTitle(node)
         node.title = newTitle
         node.app:_invalidateForm()
     end
+end
+
+local function watchedProfileKinds(node)
+    local kinds = {}
+
+    if node.spec.refreshOnProfileChange == true or node.spec.titleProfileSuffix == "pid" then
+        kinds[#kinds + 1] = "pid"
+    end
+
+    if node.spec.refreshOnRateChange == true or node.spec.titleProfileSuffix == "rate" then
+        kinds[#kinds + 1] = "rate"
+    end
+
+    if node.spec.refreshOnBatteryProfileChange == true or node.spec.titleProfileSuffix == "battery" then
+        kinds[#kinds + 1] = "battery"
+    end
+
+    return kinds
+end
+
+local function primeProfileWatchState(node)
+    local kinds = watchedProfileKinds(node)
+    local index
+    local kind
+
+    for index = 1, #kinds do
+        kind = kinds[index]
+        node.state.profileWatch[kind] = trackedProfileValue(node, kind)
+    end
+end
+
+local function handleProfileChangeReload(node)
+    local kinds = watchedProfileKinds(node)
+    local index
+    local kind
+    local previous
+    local current
+
+    if node.state.loading == true or node.state.saving == true then
+        return false
+    end
+
+    for index = 1, #kinds do
+        kind = kinds[index]
+        current = trackedProfileValue(node, kind)
+        previous = node.state.profileWatch[kind]
+
+        if previous == nil then
+            node.state.profileWatch[kind] = current
+        elseif current ~= nil and current ~= previous then
+            node.state.profileWatch[kind] = current
+            if (kind == "pid" and node.spec.refreshOnProfileChange == true) or
+                (kind == "rate" and node.spec.refreshOnRateChange == true) or
+                (kind == "battery" and node.spec.refreshOnBatteryProfileChange == true) then
+                node:reload(true)
+                return true
+            end
+        end
+    end
+
+    return false
 end
 
 local function ensureApis(node)
@@ -1117,6 +1238,7 @@ function MspPage.create(spec)
                 rows = {},
                 labels = {},
                 columns = {},
+                profileWatch = {},
                 defaultApiName = spec.api and spec.api[1] and spec.api[1].name or nil,
                 loading = false,
                 loaded = false,
@@ -1136,6 +1258,7 @@ function MspPage.create(spec)
         if okPrepare then
             prepareLayout(node)
         end
+        primeProfileWatchState(node)
 
         function node:buildForm(app)
             local groupedFields = {}
@@ -1322,7 +1445,19 @@ function MspPage.create(spec)
                 return
             end
 
+            if handleProfileChangeReload(self) == true then
+                return
+            end
+
             updateDynamicTitle(self)
+
+            if type(self.spec.wakeup) == "function" then
+                local ok, err = pcall(self.spec.wakeup, self, self.app)
+                if not ok then
+                    self.state.error = tostring(err)
+                    self.app:_invalidateForm()
+                end
+            end
         end
 
         function node:help()

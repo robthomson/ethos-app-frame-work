@@ -19,6 +19,7 @@ local MspPage = loadMspPage()
 
 return MspPage.create({
     titleProfileSuffix = "pid",
+    refreshOnProfileChange = true,
     eepromWrite = true,
     help = {
         "PID bandwidth settings from the active PID profile.",

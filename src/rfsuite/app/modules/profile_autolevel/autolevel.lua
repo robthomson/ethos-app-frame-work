@@ -19,6 +19,7 @@ local MspPage = loadMspPage()
 
 return MspPage.create({
     titleProfileSuffix = "pid",
+    refreshOnProfileChange = true,
     eepromWrite = true,
     help = {
         "Autolevel profile settings from PID profile data.",
