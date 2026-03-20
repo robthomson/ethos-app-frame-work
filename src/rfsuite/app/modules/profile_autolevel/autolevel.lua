@@ -28,17 +28,34 @@ return MspPage.create({
         {name = "PID_PROFILE", rebuildOnWrite = true}
     },
     layout = {
-        labels = {
-            {t = "Acro Trainer", inline_size = 13.6, label = 1},
-            {t = "Angle Mode", inline_size = 13.6, label = 2},
-            {t = "Horizon Mode", inline_size = 13.6, label = 3}
-        },
-        fields = {
-            {t = "Gain", inline = 2, label = 1, apikey = "trainer_gain"},
-            {t = "Max", inline = 1, label = 1, apikey = "trainer_angle_limit"},
-            {t = "Gain", inline = 2, label = 2, apikey = "angle_level_strength"},
-            {t = "Max", inline = 1, label = 2, apikey = "angle_level_limit"},
-            {t = "Gain", inline = 2, label = 3, apikey = "horizon_level_strength"}
+        kind = "rows",
+        rows = {
+            {
+                t = "Acro Trainer",
+                labelWidth = "46%",
+                slotGap = 18,
+                cells = {
+                    {t = "Gain", apikey = "trainer_gain"},
+                    {t = "Max", apikey = "trainer_angle_limit"}
+                }
+            },
+            {
+                t = "Angle Mode",
+                labelWidth = "46%",
+                slotGap = 18,
+                cells = {
+                    {t = "Gain", apikey = "angle_level_strength"},
+                    {t = "Max", apikey = "angle_level_limit"}
+                }
+            },
+            {
+                t = "Horizon Mode",
+                labelWidth = "46%",
+                slotGap = 18,
+                cells = {
+                    {t = "Gain", apikey = "horizon_level_strength", width = "34%"}
+                }
+            }
         }
     }
 })

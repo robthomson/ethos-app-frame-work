@@ -1706,6 +1706,29 @@ function App:_makeLoadErrorNode(item, breadcrumb, err)
         subtitle = tostring(err),
         breadcrumb = breadcrumb,
         navButtons = {menu = true, save = false, reload = false, tool = false, help = false},
+        state = {errorDialogShown = false},
+        wakeup = function(node)
+            if node.state.errorDialogShown == true then
+                return
+            end
+            if not (form and form.openDialog) then
+                return
+            end
+
+            node.state.errorDialogShown = true
+            form.openDialog({
+                width = nil,
+                title = "Load Error",
+                message = tostring(err),
+                buttons = {{
+                    label = "Close",
+                    action = function()
+                        return true
+                    end
+                }},
+                options = TEXT_LEFT
+            })
+        end,
         items = {
             {id = "status", title = "Status", kind = "static", value = "Load Error"},
             {id = "path", title = "Path", kind = "static", value = (type(item) == "table" and item.path) or "n/a"},
@@ -1842,19 +1865,42 @@ function App:_headerTitlePos()
     }
 end
 
-function App:_navButtonsForNode(node)
-    local buttons = node and node.navButtons
-    if type(buttons) == "table" then
+local function normalizeNavButton(value)
+    if type(value) == "table" then
         return {
-            menu = buttons.menu == true,
-            save = buttons.save == true,
-            reload = buttons.reload == true,
-            tool = buttons.tool == true,
-            help = buttons.help == true
+            enabled = value.enabled ~= false,
+            icon = value.icon,
+            text = value.text
         }
     end
 
-    return {menu = true, save = false, reload = false, tool = false, help = false}
+    return {
+        enabled = value == true,
+        icon = nil,
+        text = nil
+    }
+end
+
+function App:_navButtonsForNode(node)
+    local buttons = node and node.navButtons
+
+    if type(buttons) == "table" then
+        return {
+            menu = normalizeNavButton(buttons.menu),
+            save = normalizeNavButton(buttons.save),
+            reload = normalizeNavButton(buttons.reload),
+            tool = normalizeNavButton(buttons.tool),
+            help = normalizeNavButton(buttons.help)
+        }
+    end
+
+    return {
+        menu = normalizeNavButton(true),
+        save = normalizeNavButton(false),
+        reload = normalizeNavButton(false),
+        tool = normalizeNavButton(false),
+        help = normalizeNavButton(false)
+    }
 end
 
 function App:_requestExit()
@@ -1881,7 +1927,8 @@ function App:_addNavigationButtons()
             key = "menu",
             text = "Menu",
             compact = false,
-            visible = navConfig.menu == true,
+            visible = navConfig.menu.enabled == true,
+            icon = navConfig.menu.icon,
             press = function()
                 if atRoot then
                     self:_requestExit()
@@ -1894,7 +1941,8 @@ function App:_addNavigationButtons()
             key = "save",
             text = "Save",
             compact = false,
-            visible = navConfig.save == true,
+            visible = navConfig.save.enabled == true,
+            icon = navConfig.save.icon,
             press = function()
                 self:_handleSaveAction()
             end
@@ -1903,25 +1951,28 @@ function App:_addNavigationButtons()
             key = "reload",
             text = "Reload",
             compact = false,
-            visible = navConfig.reload == true,
+            visible = navConfig.reload.enabled == true,
+            icon = navConfig.reload.icon,
             press = function()
                 self:_handleReloadAction()
             end
         },
         {
             key = "tool",
-            text = "*",
+            text = navConfig.tool.text or "*",
             compact = true,
-            visible = navConfig.tool == true,
+            visible = navConfig.tool.enabled == true,
+            icon = navConfig.tool.icon,
             press = function()
                 self:_runNodeHook(self.currentNode, "tool")
             end
         },
         {
             key = "help",
-            text = "Help",
-            compact = false,
-            visible = navConfig.help == true,
+            text = navConfig.help.text or "?",
+            compact = true,
+            visible = navConfig.help.enabled == true,
+            icon = navConfig.help.icon,
             press = function()
                 self:_runNodeHook(self.currentNode, "help")
             end
@@ -1947,6 +1998,7 @@ function App:_addNavigationButtons()
         bx = xRight - width
         field = form.addButton(nil, {x = bx, y = y, w = width, h = metrics.buttonH}, {
             text = def.text,
+            icon = type(def.icon) == "string" and self:_loadMask(def.icon) or nil,
             options = FONT_S,
             paint = NOOP_PAINT,
             press = def.press

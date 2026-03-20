@@ -28,21 +28,38 @@ return MspPage.create({
         {name = "PID_PROFILE", rebuildOnWrite = true}
     },
     layout = {
-        labels = {
-            {t = "Gyro Cutoff", inline_size = 8.15, label = 1},
-            {t = "D-Term Cutoff", inline_size = 8.15, label = 2},
-            {t = "B-Term Cutoff", inline_size = 8.15, label = 3}
-        },
-        fields = {
-            {t = "Roll", inline = 3, label = 1, apikey = "gyro_cutoff_0"},
-            {t = "Pitch", inline = 2, label = 1, apikey = "gyro_cutoff_1"},
-            {t = "Yaw", inline = 1, label = 1, apikey = "gyro_cutoff_2"},
-            {t = "Roll", inline = 3, label = 2, apikey = "dterm_cutoff_0"},
-            {t = "Pitch", inline = 2, label = 2, apikey = "dterm_cutoff_1"},
-            {t = "Yaw", inline = 1, label = 2, apikey = "dterm_cutoff_2"},
-            {t = "Roll", inline = 3, label = 3, apikey = "bterm_cutoff_0"},
-            {t = "Pitch", inline = 2, label = 3, apikey = "bterm_cutoff_1"},
-            {t = "Yaw", inline = 1, label = 3, apikey = "bterm_cutoff_2"}
+        kind = "rows",
+        rows = {
+            {
+                t = "Gyro Cutoff",
+                labelWidth = "28%",
+                slotGap = 14,
+                cells = {
+                    {t = "Roll", apikey = "gyro_cutoff_0", fieldWidth = "80px"},
+                    {t = "Pitch", apikey = "gyro_cutoff_1", fieldWidth = "80px"},
+                    {t = "Yaw", apikey = "gyro_cutoff_2", fieldWidth = "80px"}
+                }
+            },
+            {
+                t = "D-Term Cutoff",
+                labelWidth = "28%",
+                slotGap = 14,
+                cells = {
+                    {t = "Roll", apikey = "dterm_cutoff_0", fieldWidth = "80px"},
+                    {t = "Pitch", apikey = "dterm_cutoff_1", fieldWidth = "80px"},
+                    {t = "Yaw", apikey = "dterm_cutoff_2", fieldWidth = "80px"}
+                }
+            },
+            {
+                t = "B-Term Cutoff",
+                labelWidth = "28%",
+                slotGap = 14,
+                cells = {
+                    {t = "Roll", apikey = "bterm_cutoff_0", fieldWidth = "80px"},
+                    {t = "Pitch", apikey = "bterm_cutoff_1", fieldWidth = "80px"},
+                    {t = "Yaw", apikey = "bterm_cutoff_2", fieldWidth = "80px"}
+                }
+            }
         }
     }
 })

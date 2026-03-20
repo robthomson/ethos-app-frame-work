@@ -10,6 +10,7 @@ local MspPage = {}
 local FIELD_TYPE_CHOICE = 1
 local DEFAULT_INLINE_SIZE = 13.6
 local DEFAULT_NAV = {menu = true, save = true, reload = true, tool = false, help = false}
+local relinkFlexRows
 
 local function copyTable(source)
     local out = {}
@@ -152,6 +153,20 @@ local function lineLabelSize(node, labelId)
     return DEFAULT_INLINE_SIZE
 end
 
+local function measureTextWidth(text)
+    local value = tostring(text or "")
+
+    if lcd and lcd.font and FONT_STD then
+        lcd.font(FONT_STD)
+    end
+
+    if lcd and lcd.getTextSize then
+        return select(1, lcd.getTextSize(value)) or 0
+    end
+
+    return #value * 8
+end
+
 local function inlinePositions(node, app, field)
     local width = app:_windowSize()
     local padding = 5
@@ -167,13 +182,7 @@ local function inlinePositions(node, app, field)
     local textX = width - fieldWidth * m - textWidth - textPadding
     local editX = width - fieldWidth * m - ((field.inline == 1) and padding or 0)
 
-    if lcd and lcd.font and FONT_STD then
-        lcd.font(FONT_STD)
-    end
-
-    if lcd and lcd.getTextSize then
-        textWidth = select(1, lcd.getTextSize(fieldText)) or 0
-    end
+    textWidth = measureTextWidth(fieldText)
 
     textWidth = textWidth + padding
     textX = width - fieldWidth * m - textWidth - textPadding
@@ -322,6 +331,71 @@ local function visibleLabels(node)
     return labels
 end
 
+local function visibleRows(node)
+    local rows = {}
+    local sourceRows = node.spec.layout and node.spec.layout.rows or {}
+    local index
+    local row
+
+    for index = 1, #sourceRows do
+        row = sourceRows[index]
+        if allowedByApiVersion(row) then
+            rows[#rows + 1] = copyTable(row)
+        end
+    end
+
+    return rows
+end
+
+local function visibleColumns(node)
+    local columns = {}
+    local sourceColumns = node.spec.layout and node.spec.layout.columns or {}
+    local index
+    local column
+
+    for index = 1, #sourceColumns do
+        column = sourceColumns[index]
+        if allowedByApiVersion(column) then
+            columns[#columns + 1] = copyTable(column)
+        end
+    end
+
+    return columns
+end
+
+local function visibleFlexRows(node)
+    local rows = {}
+    local fields = {}
+    local sourceRows = node.spec.layout and node.spec.layout.rows or {}
+    local rowIndex
+    local cellIndex
+    local sourceRow
+    local row
+    local sourceCells
+    local cell
+
+    for rowIndex = 1, #sourceRows do
+        sourceRow = sourceRows[rowIndex]
+        if allowedByApiVersion(sourceRow) then
+            row = copyTable(sourceRow)
+            row.cells = {}
+            sourceCells = sourceRow.cells or {}
+
+            for cellIndex = 1, #sourceCells do
+                cell = sourceCells[cellIndex]
+                if allowedByApiVersion(cell) then
+                    fields[#fields + 1] = mergedField(node, cell)
+                    row.cells[#row.cells + 1] = fields[#fields]
+                end
+            end
+
+            rows[#rows + 1] = row
+        end
+    end
+
+    return rows, fields
+end
+
 local function mergeFieldsInPlace(targetFields, sourceFields)
     local index
     local target
@@ -417,6 +491,20 @@ local function buildNumberField(line, pos, field)
         end)
 end
 
+local function buildControlAtPosition(line, field, pos)
+    local control
+
+    if field.type == FIELD_TYPE_CHOICE or type(field.table) == "table" then
+        control = buildChoiceField(line, pos, field)
+    else
+        control = buildNumberField(line, pos, field)
+    end
+
+    applyFieldDecoration(control, field)
+    field.control = control
+    return control
+end
+
 local function applyControlValue(control, value)
     local ok
 
@@ -447,21 +535,72 @@ end
 
 local function buildField(line, node, app, field)
     local positions = inlinePositions(node, app, field)
-    local control
 
     if tostring(field.t or "") ~= "" then
         form.addStaticText(line, positions.text, tostring(field.t))
     end
 
-    if field.type == FIELD_TYPE_CHOICE or type(field.table) == "table" then
-        control = buildChoiceField(line, positions.field, field)
-    else
-        control = buildNumberField(line, positions.field, field)
+    return buildControlAtPosition(line, field, positions.field)
+end
+
+local function buildFieldAtPosition(line, field, positions)
+    if tostring(field.t or "") ~= "" then
+        form.addStaticText(line, positions.text, tostring(field.t))
     end
 
-    applyFieldDecoration(control, field)
-    field.control = control
-    return control
+    return buildControlAtPosition(line, field, positions.field)
+end
+
+local function rowSlotsStartX(node, app)
+    local labels = node.state.labels or {}
+    local index
+    local maxWidth = 0
+    local rowLabelWidth = tonumber(node.spec.layout and node.spec.layout.rowLabelWidth) or 0.34
+
+    for index = 1, #labels do
+        maxWidth = math.max(maxWidth, measureTextWidth(labels[index].t or ""))
+    end
+
+    return math.max(math.floor(app:_windowSize() * rowLabelWidth), maxWidth + 18)
+end
+
+local function buildRowSlots(line, node, app, fields)
+    local width = app:_windowSize()
+    local rowH = app.radio.navbuttonHeight or 30
+    local rowY = app.radio.linePaddingTop or 0
+    local slotGap = tonumber(node.spec.layout and node.spec.layout.slotGap) or 12
+    local fieldGap = tonumber(node.spec.layout and node.spec.layout.fieldGap) or 8
+    local rightPadding = tonumber(node.spec.layout and node.spec.layout.rightPadding) or 5
+    local startX = rowSlotsStartX(node, app)
+    local count = math.max(1, #fields)
+    local slotW = math.floor((width - startX - rightPadding - ((count - 1) * slotGap)) / count)
+    local labelW = 0
+    local minFieldW = tonumber(node.spec.layout and node.spec.layout.minFieldWidth) or 70
+    local index
+    local field
+    local textW
+    local fieldW
+    local slotX
+
+    for index = 1, #fields do
+        labelW = math.max(labelW, measureTextWidth(fields[index].t or ""))
+    end
+
+    labelW = labelW + 6
+    fieldW = math.max(minFieldW, slotW - labelW - fieldGap)
+    if fieldW > slotW then
+        fieldW = slotW
+    end
+
+    for index = 1, #fields do
+        field = fields[index]
+        textW = math.min(labelW, math.max(0, slotW - fieldW - fieldGap))
+        slotX = startX + ((index - 1) * (slotW + slotGap))
+        buildFieldAtPosition(line, field, {
+            text = {x = slotX, y = rowY, w = textW, h = rowH},
+            field = {x = slotX + textW + fieldGap, y = rowY, w = fieldW, h = rowH}
+        })
+    end
 end
 
 local function beginLoader(node, options)
@@ -484,9 +623,304 @@ local function beginLoader(node, options)
 end
 
 local function prepareLayout(node)
-    node.state.labels = visibleLabels(node)
-    node.state.fields = mergeFieldsInPlace(node.state.fields or {}, visibleFields(node))
+    if node.spec.layout and node.spec.layout.kind == "rows" then
+        local rows
+        local fields
+
+        rows, fields = visibleFlexRows(node)
+        node.state.fields = mergeFieldsInPlace(node.state.fields or {}, fields)
+        node.state.rows = relinkFlexRows(rows, node.state.fields)
+        node.state.labels = {}
+        node.state.columns = {}
+    elseif node.spec.layout and node.spec.layout.kind == "matrix" then
+        node.state.labels = visibleRows(node)
+        node.state.columns = visibleColumns(node)
+        node.state.rows = {}
+        node.state.fields = mergeFieldsInPlace(node.state.fields or {}, visibleFields(node))
+    else
+        node.state.labels = visibleLabels(node)
+        node.state.columns = {}
+        node.state.rows = {}
+        node.state.fields = mergeFieldsInPlace(node.state.fields or {}, visibleFields(node))
+    end
     return true
+end
+
+local function matrixRowKey(row, index)
+    return tostring((type(row) == "table" and (row.id or row.label)) or index)
+end
+
+local function matrixColumnKey(column, index)
+    return tostring((type(column) == "table" and column.id) or index)
+end
+
+local function matrixStartX(node, app)
+    local labels = node.state.labels or {}
+    local rowLabelWidth = tonumber(node.spec.layout and node.spec.layout.rowLabelWidth) or 0.34
+    local index
+    local maxWidth = 0
+
+    for index = 1, #labels do
+        maxWidth = math.max(maxWidth, measureTextWidth(labels[index].t or ""))
+    end
+
+    return math.max(math.floor(app:_windowSize() * rowLabelWidth), maxWidth + 18)
+end
+
+local function matrixFieldLookup(fields)
+    local lookup = {}
+    local index
+    local field
+    local rowKey
+    local columnKey
+
+    for index = 1, #fields do
+        field = fields[index]
+        if field and field.row ~= nil and field.column ~= nil then
+            rowKey = tostring(field.row)
+            columnKey = tostring(field.column)
+            lookup[rowKey] = lookup[rowKey] or {}
+            lookup[rowKey][columnKey] = field
+        end
+    end
+
+    return lookup
+end
+
+local function buildMatrixHeader(line, node, app, columns)
+    local width = app:_windowSize()
+    local rowH = app.radio.navbuttonHeight or 30
+    local rowY = app.radio.linePaddingTop or 0
+    local gap = tonumber(node.spec.layout and node.spec.layout.slotGap) or 10
+    local rightPadding = tonumber(node.spec.layout and node.spec.layout.rightPadding) or 5
+    local startX = matrixStartX(node, app)
+    local count = math.max(1, #columns)
+    local cellW = math.floor((width - startX - rightPadding - ((count - 1) * gap)) / count)
+    local index
+    local column
+    local cellX
+
+    for index = 1, #columns do
+        column = columns[index]
+        cellX = startX + ((index - 1) * (cellW + gap))
+        form.addStaticText(line, {x = cellX, y = rowY, w = cellW, h = rowH}, tostring(column.t or column.id or ""))
+    end
+end
+
+local function buildMatrixRow(line, node, app, row, columns, rowFields)
+    local width = app:_windowSize()
+    local rowH = app.radio.navbuttonHeight or 30
+    local rowY = app.radio.linePaddingTop or 0
+    local gap = tonumber(node.spec.layout and node.spec.layout.slotGap) or 10
+    local rightPadding = tonumber(node.spec.layout and node.spec.layout.rightPadding) or 5
+    local startX = matrixStartX(node, app)
+    local count = math.max(1, #columns)
+    local cellW = math.floor((width - startX - rightPadding - ((count - 1) * gap)) / count)
+    local index
+    local column
+    local field
+    local cellX
+
+    for index = 1, #columns do
+        column = columns[index]
+        field = rowFields and rowFields[matrixColumnKey(column, index)] or nil
+        if field then
+            cellX = startX + ((index - 1) * (cellW + gap))
+            buildControlAtPosition(line, field, {x = cellX, y = rowY, w = cellW, h = rowH})
+        end
+    end
+end
+
+relinkFlexRows = function(rows, fields)
+    local fieldIndex = 1
+    local rowIndex
+    local cellIndex
+
+    for rowIndex = 1, #rows do
+        for cellIndex = 1, #(rows[rowIndex].cells or {}) do
+            rows[rowIndex].cells[cellIndex] = fields[fieldIndex]
+            fieldIndex = fieldIndex + 1
+        end
+    end
+
+    return rows
+end
+
+local function resolveDimension(value, percentBasis)
+    local numeric
+    local percent
+
+    if type(value) ~= "string" then
+        return nil
+    end
+
+    percent = string.match(value, "^%s*([%d%.]+)%%%s*$")
+    if percent then
+        numeric = tonumber(percent)
+        if numeric ~= nil then
+            return math.floor((percentBasis or 0) * numeric / 100)
+        end
+    end
+
+    numeric = string.match(value, "^%s*([%d%.]+)px%s*$")
+    if numeric then
+        numeric = tonumber(numeric)
+        if numeric ~= nil then
+            return math.floor(numeric)
+        end
+    end
+
+    return nil
+end
+
+local function resolveRowStartX(node, app, row)
+    local width = app:_windowSize()
+    local rowTitle = (type(row) == "table" and (row.t or row.title)) or ""
+    local minWidth = measureTextWidth(rowTitle) + 18
+    local configured = resolveDimension(row.labelWidth or row.rowLabelWidth or (node.spec.layout and node.spec.layout.rowLabelWidth), width)
+
+    return math.max(configured or 0, minWidth)
+end
+
+local function resolveCellWidth(value, availableWidth, totalWidth)
+    return resolveDimension(value, availableWidth or totalWidth)
+end
+
+local function resolveFieldWidth(value, cellWidth, totalWidth)
+    return resolveDimension(value, cellWidth or totalWidth)
+end
+
+local function preferredCellWidth(cell, totalWidth, minFieldW, fieldGap)
+    local labelWidth = 0
+    local controlWidth
+
+    if tostring(cell.t or "") ~= "" then
+        labelWidth = resolveDimension(cell.labelWidth, totalWidth) or (measureTextWidth(cell.t or "") + 6)
+    end
+
+    controlWidth = resolveFieldWidth(cell.fieldWidth, totalWidth, totalWidth) or minFieldW
+    controlWidth = math.max(minFieldW, controlWidth)
+
+    if labelWidth > 0 then
+        return labelWidth + fieldGap + controlWidth
+    end
+
+    return controlWidth
+end
+
+local function buildFlexRow(line, node, app, row)
+    local width = app:_windowSize()
+    local rowH = app.radio.navbuttonHeight or 30
+    local rowY = app.radio.linePaddingTop or 0
+    local rightPadding = tonumber(row.rightPadding or (node.spec.layout and node.spec.layout.rightPadding)) or 12
+    local slotGap = tonumber(row.slotGap or row.gap or (node.spec.layout and node.spec.layout.slotGap)) or 10
+    local fieldGap = tonumber(row.fieldGap or (node.spec.layout and node.spec.layout.fieldGap)) or 8
+    local minFieldW = tonumber(row.minFieldWidth or (node.spec.layout and node.spec.layout.minFieldWidth)) or 70
+    local align = tostring(row.align or (node.spec.layout and node.spec.layout.align) or "right")
+    local startX = resolveRowStartX(node, app, row)
+    local cells = row.cells or {}
+    local count = #cells
+    local availableWidth = width - startX - rightPadding - math.max(0, count - 1) * slotGap
+    local fixedWidth = 0
+    local flexibleWeight = 0
+    local index
+    local cell
+    local cellWidth
+    local cellWidths = {}
+    local remainingWidth
+    local remainingWeight
+    local cellX = startX
+    local labelWidth
+    local controlWidth
+    local textWidth
+    local configuredFieldWidth
+
+    if count == 0 then
+        return
+    end
+
+    for index = 1, count do
+        cell = cells[index]
+        cellWidth = resolveCellWidth(cell.width, availableWidth, width)
+        if cellWidth ~= nil then
+            fixedWidth = fixedWidth + cellWidth
+            cellWidths[index] = cellWidth
+        elseif align == "right" then
+            cellWidth = preferredCellWidth(cell, width, minFieldW, fieldGap)
+            fixedWidth = fixedWidth + cellWidth
+            cellWidths[index] = cellWidth
+        else
+            flexibleWeight = flexibleWeight + math.max(0, tonumber(cell.weight) or 1)
+        end
+    end
+
+    remainingWidth = math.max(0, availableWidth - fixedWidth)
+    remainingWeight = flexibleWeight
+
+    for index = 1, count do
+        cell = cells[index]
+        cellWidth = cellWidths[index]
+        if cellWidth == nil then
+            local weight = math.max(0, tonumber(cell.weight) or 1)
+            if index == count or remainingWeight <= 0 then
+                cellWidth = remainingWidth
+            else
+                cellWidth = math.floor((remainingWidth * weight) / remainingWeight)
+            end
+            remainingWidth = math.max(0, remainingWidth - cellWidth)
+            remainingWeight = math.max(0, remainingWeight - weight)
+        end
+        cellWidths[index] = cellWidth
+    end
+
+    if align == "right" then
+        local usedWidth = 0
+
+        for index = 1, count do
+            usedWidth = usedWidth + (cellWidths[index] or 0)
+        end
+        usedWidth = usedWidth + math.max(0, count - 1) * slotGap
+        cellX = math.max(startX, width - rightPadding - usedWidth)
+    end
+
+    for index = 1, count do
+        cell = cells[index]
+        cellWidth = cellWidths[index] or 0
+        labelWidth = 0
+        if tostring(cell.t or "") ~= "" then
+            labelWidth = resolveCellWidth(cell.labelWidth, cellWidth, width) or (measureTextWidth(cell.t or "") + 6)
+        end
+
+        controlWidth = cellWidth
+        if labelWidth > 0 then
+            configuredFieldWidth = resolveFieldWidth(cell.fieldWidth, cellWidth, width)
+            if configuredFieldWidth ~= nil then
+                controlWidth = math.max(minFieldW, math.min(configuredFieldWidth, cellWidth))
+            else
+                controlWidth = math.max(minFieldW, cellWidth - labelWidth - fieldGap)
+            end
+            controlWidth = math.min(controlWidth, cellWidth)
+            textWidth = math.min(labelWidth, math.max(0, cellWidth - controlWidth - fieldGap))
+        else
+            configuredFieldWidth = resolveFieldWidth(cell.fieldWidth, cellWidth, width)
+            if configuredFieldWidth ~= nil then
+                controlWidth = math.max(minFieldW, math.min(configuredFieldWidth, cellWidth))
+            end
+            textWidth = 0
+        end
+
+        buildFieldAtPosition(line, cell, {
+            text = {x = cellX, y = rowY, w = textWidth, h = rowH},
+            field = {
+                x = cellX + textWidth + ((textWidth > 0) and fieldGap or 0),
+                y = rowY,
+                w = math.max(0, controlWidth),
+                h = rowH
+            }
+        })
+
+        cellX = cellX + cellWidth + slotGap
+    end
 end
 
 local function finishRead(node)
@@ -680,7 +1114,9 @@ function MspPage.create(spec)
             state = {
                 apis = {},
                 fields = {},
+                rows = {},
                 labels = {},
+                columns = {},
                 defaultApiName = spec.api and spec.api[1] and spec.api[1].name or nil,
                 loading = false,
                 loaded = false,
@@ -693,7 +1129,7 @@ function MspPage.create(spec)
         local okPrepare
 
         for navKey, enabled in pairs(spec.navButtons or {}) do
-            node.navButtons[navKey] = enabled == true
+            node.navButtons[navKey] = enabled
         end
 
         okPrepare = ensureApis(node)
@@ -706,21 +1142,49 @@ function MspPage.create(spec)
             local groupedIndex = {}
             local visibleLabelIndex = {}
             local labels = self.state.labels
+            local columns = self.state.columns or {}
+            local rows = self.state.rows or {}
             local fields = self.state.fields
             local index
             local label
             local field
             local line
             local labelId
+            local rowLookup
 
             if self.state.error then
                 line = form.addLine("Status")
                 form.addStaticText(line, nil, tostring(self.state.error))
+                return
             end
 
             if #fields == 0 then
                 line = form.addLine("Status")
                 form.addStaticText(line, nil, self.state.loading == true and "Loading..." or "Waiting...")
+                return
+            end
+
+            if self.spec.layout and self.spec.layout.kind == "rows" then
+                for index = 1, #rows do
+                    line = form.addLine(tostring(rows[index].t or rows[index].title or ""))
+                    buildFlexRow(line, self, app, rows[index])
+                end
+                return
+            end
+
+            if self.spec.layout and self.spec.layout.kind == "matrix" then
+                if #columns > 0 then
+                    line = form.addLine("")
+                    buildMatrixHeader(line, self, app, columns)
+                end
+
+                rowLookup = matrixFieldLookup(fields)
+
+                for index = 1, #labels do
+                    label = labels[index]
+                    line = form.addLine(tostring(label.t or ""))
+                    buildMatrixRow(line, self, app, label, columns, rowLookup[matrixRowKey(label, index)])
+                end
                 return
             end
 
@@ -743,8 +1207,12 @@ function MspPage.create(spec)
                 label = labels[index]
                 if groupedIndex[label.label] == true then
                     line = form.addLine(tostring(label.t or ""))
-                    for _, field in ipairs(groupedFields[label.label]) do
-                        buildField(line, self, app, field)
+                    if self.spec.layout and self.spec.layout.kind == "row_slots" then
+                        buildRowSlots(line, self, app, groupedFields[label.label])
+                    else
+                        for _, field in ipairs(groupedFields[label.label]) do
+                            buildField(line, self, app, field)
+                        end
                     end
                 end
             end
@@ -753,12 +1221,7 @@ function MspPage.create(spec)
                 field = fields[index]
                 if not (field.label ~= nil and field.inline ~= nil and groupedIndex[field.label] == true) then
                     line = form.addLine(tostring(field.t or field.apikey or "Field"))
-                    if field.type == FIELD_TYPE_CHOICE or type(field.table) == "table" then
-                        field.control = buildChoiceField(line, nil, field)
-                    else
-                        field.control = buildNumberField(line, nil, field)
-                    end
-                    applyFieldDecoration(field.control, field)
+                    field.control = buildControlAtPosition(line, field, nil)
                 end
             end
         end
