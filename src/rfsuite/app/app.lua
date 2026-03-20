@@ -164,6 +164,7 @@ function App:init(framework)
     self.snapshot = {}
     self.pathStack = {}
     self.currentNode = nil
+    self.currentNodeItem = nil
     self.currentNodeSource = MENU_ROOT_PATH
     self.formDirty = true
     self.rootLoadError = nil
@@ -175,6 +176,8 @@ function App:init(framework)
     self.maskCacheOrder = {}
     self.pageDirty = false
     self.mspTask = nil
+    self.profileCheckAt = 0
+    self.rateProfileCheckAt = 0
     self.loader = {
         active = nil,
         status = nil,
@@ -401,7 +404,198 @@ end
 
 function App:_afterNodeChanged()
     self:_pruneMaskCacheForNode(self.currentNode)
+    self:_primeNodeSessionReloadState(self.currentNode)
     pcall(collectgarbage, "step", 64)
+end
+
+function App:_telemetryHasSource(sensorKey)
+    local telemetry = self:_telemetry()
+    local ok
+    local source
+
+    if not (telemetry and telemetry.getSensorSource) then
+        return false
+    end
+
+    ok, source = pcall(telemetry.getSensorSource, telemetry, sensorKey)
+    return ok and source ~= nil
+end
+
+function App:_primeNodeSessionReloadState(node)
+    if type(node) ~= "table" or not self.framework or not self.framework.session then
+        return
+    end
+
+    node._sessionReloadState = {
+        activeProfile = self.framework.session:get("activeProfile"),
+        activeRateProfile = self.framework.session:get("activeRateProfile")
+    }
+end
+
+function App:_refreshActiveProfileState()
+    local node = self.currentNode
+    local now = os.clock()
+    local interval
+    local value
+
+    if type(node) ~= "table" or not self.framework or not self.framework.session then
+        return
+    end
+
+    if node.refreshOnProfileChange ~= true and node.refreshFullOnProfileChange ~= true then
+        return
+    end
+
+    interval = self:_telemetryHasSource("pid_profile") and 0.10 or 1.50
+    if (now - (self.profileCheckAt or 0)) < interval then
+        return
+    end
+
+    self.profileCheckAt = now
+    value = tonumber(self:_readTelemetry("pid_profile"))
+    if value ~= nil then
+        self.framework.session:set("activeProfile", math.floor(value))
+    end
+end
+
+function App:_refreshActiveRateProfileState()
+    local node = self.currentNode
+    local now = os.clock()
+    local interval
+    local value
+
+    if type(node) ~= "table" or not self.framework or not self.framework.session then
+        return
+    end
+
+    if node.refreshOnRateChange ~= true and node.refreshFullOnRateChange ~= true then
+        return
+    end
+
+    interval = self:_telemetryHasSource("rate_profile") and 0.10 or 1.50
+    if (now - (self.rateProfileCheckAt or 0)) < interval then
+        return
+    end
+
+    self.rateProfileCheckAt = now
+    value = tonumber(self:_readTelemetry("rate_profile"))
+    if value ~= nil then
+        self.framework.session:set("activeRateProfile", math.floor(value))
+    end
+end
+
+function App:_canAutoReloadCurrentNode()
+    local node = self.currentNode
+    local mspTask = self:_msp()
+    local queue = mspTask and mspTask.queue or nil
+
+    if type(node) ~= "table" then
+        return false
+    end
+    if self.loader and self.loader.active then
+        return false
+    end
+    if self:_loaderBusyState() == true then
+        return false
+    end
+    if type(node.state) == "table" and (node.state.loading == true or node.state.saving == true) then
+        return false
+    end
+    if queue and type(queue.isProcessed) == "function" and queue:isProcessed() ~= true then
+        return false
+    end
+
+    return true
+end
+
+function App:_reloadCurrentPageNode(forceFull)
+    local node = self.currentNode
+    local result
+
+    if type(self.currentNodeSource) ~= "string" or self.currentNodeSource:sub(1, 5) ~= "page:" then
+        return false
+    end
+
+    if forceFull ~= true and type(node) == "table" and type(node.reload) == "function" then
+        result = self:_runNodeHook(node, "reload")
+        if result == false then
+            return false
+        end
+        self:setPageDirty(false)
+        self:_primeNodeSessionReloadState(node)
+        return true
+    end
+
+    if type(self.currentNodeItem) ~= "table" then
+        return false
+    end
+
+    self:_closeNode(self.currentNode)
+    self.currentNode = self:_loadPageNode(self.currentNodeItem, self.currentNode and self.currentNode.breadcrumb or nil)
+    self:setPageDirty(false)
+    self:_afterNodeChanged()
+    self:_invalidateForm()
+    return true
+end
+
+function App:_handleSessionDrivenReloads()
+    local node = self.currentNode
+    local state
+    local activeProfile
+    local activeRateProfile
+    local needFullReload = false
+    local needReload = false
+
+    if type(node) ~= "table" or type(self.currentNodeSource) ~= "string" or self.currentNodeSource:sub(1, 5) ~= "page:" then
+        return
+    end
+
+    self:_refreshActiveProfileState()
+    self:_refreshActiveRateProfileState()
+
+    state = node._sessionReloadState
+    if type(state) ~= "table" then
+        self:_primeNodeSessionReloadState(node)
+        return
+    end
+
+    activeProfile = self.framework and self.framework.session and self.framework.session:get("activeProfile") or nil
+    activeRateProfile = self.framework and self.framework.session and self.framework.session:get("activeRateProfile") or nil
+
+    if activeProfile ~= nil and state.activeProfile ~= nil and activeProfile ~= state.activeProfile then
+        if node.refreshFullOnProfileChange == true then
+            needFullReload = true
+        elseif node.refreshOnProfileChange == true then
+            needReload = true
+        end
+    end
+
+    if activeRateProfile ~= nil and state.activeRateProfile ~= nil and activeRateProfile ~= state.activeRateProfile then
+        if node.refreshFullOnRateChange == true then
+            needFullReload = true
+        elseif node.refreshOnRateChange == true then
+            needReload = true
+        end
+    end
+
+    if needFullReload ~= true and needReload ~= true then
+        state.activeProfile = activeProfile
+        state.activeRateProfile = activeRateProfile
+        return
+    end
+
+    if self:_canAutoReloadCurrentNode() ~= true then
+        return
+    end
+
+    if self:_reloadCurrentPageNode(needFullReload) == true then
+        if self.currentNode and self.currentNode ~= node then
+            self:_primeNodeSessionReloadState(self.currentNode)
+        else
+            state.activeProfile = activeProfile
+            state.activeRateProfile = activeRateProfile
+        end
+    end
 end
 
 function App:_reportNodeError(context, err)
@@ -638,14 +832,14 @@ function App:_createUiBridge()
         updateProgressDialogMessage = function(message)
             return self:updateLoader({message = message})
         end,
-        clearProgressDialog = function()
-            return self:clearLoader()
+        clearProgressDialog = function(force)
+            return self:clearLoader(force)
         end,
-        progressClose = function()
-            return self:clearLoader()
+        progressClose = function(force)
+            return self:clearLoader(force)
         end,
-        closeLoader = function()
-            return self:clearLoader()
+        closeLoader = function(force)
+            return self:clearLoader(force)
         end,
         progressDisplayIsActive = function()
             return self:isLoaderActive()
@@ -1282,6 +1476,37 @@ function App:_resolveItemValue(item)
     return item.valueHint or ""
 end
 
+function App:_shouldServiceAppMsp()
+    local node = self.currentNode
+    local mspTask = self:_msp()
+    local queue = mspTask and mspTask.queue or nil
+
+    if not mspTask then
+        return false
+    end
+    if queue and type(queue.isProcessed) == "function" and queue:isProcessed() ~= true then
+        return true
+    end
+    if type(node) == "table" and node.usesMspApi == true then
+        return true
+    end
+
+    return false
+end
+
+function App:_serviceAppMsp()
+    local mspTask
+
+    if self:_shouldServiceAppMsp() ~= true then
+        return
+    end
+
+    mspTask = self:_msp()
+    if mspTask and type(mspTask.wakeup) == "function" then
+        pcall(mspTask.wakeup, mspTask)
+    end
+end
+
 function App:_itemEnabled(item)
     local visibility = loadMenuVisibilityModule()
 
@@ -1470,6 +1695,7 @@ function App:_runDeferredMaintenanceStep()
         self:_rebuildFormIfNeeded()
         self:_syncMenuButtonStates()
     else
+        self:_handleSessionDrivenReloads()
         self:_runNodeHook(self.currentNode, "wakeup")
         self:_updateValueFields()
         self:_clearMenuNavigationLoader()
@@ -1538,6 +1764,7 @@ function App:_consumePreparedStartupRoot()
 
     self.currentNodeSource = MENU_ROOT_PATH
     self.currentNode = job.node
+    self.currentNodeItem = nil
     self.pathStack = {}
     self:setPageDirty(false)
     self:_afterNodeChanged()
@@ -1679,6 +1906,7 @@ function App:_openRoot()
     self:_closeNode(self.currentNode)
     self:setPageDirty(false)
     self.pathStack = {}
+    self.currentNodeItem = nil
     self.currentNodeSource = MENU_ROOT_PATH
     self.currentNode = self:_loadRootNode()
     self:_afterNodeChanged()
@@ -1790,13 +2018,16 @@ function App:_enterItem(index, item)
     }
 
     if item.kind == "menu" and type(item.source) == "string" then
+        self.currentNodeItem = nil
         self.currentNodeSource = item.source
         self.currentNode = self:_loadNodeFromSource(item.source)
         self.currentNode.breadcrumb = breadcrumb
     elseif item.kind == "page" then
+        self.currentNodeItem = item
         self.currentNodeSource = "page:" .. tostring(item.path or item.id or index)
         self.currentNode = self:_loadPageNode(item, breadcrumb)
     else
+        self.currentNodeItem = nil
         self.currentNodeSource = "leaf:" .. tostring(item.id or index)
         self.currentNode = self:_makeLeafNode(item, breadcrumb)
     end
@@ -1818,8 +2049,10 @@ function App:_goBack()
     self.pathStack[#self.pathStack] = nil
     self.currentNodeSource = previous.source
     if previous.source == MENU_ROOT_PATH then
+        self.currentNodeItem = nil
         self.currentNode = self:_loadRootNode()
     else
+        self.currentNodeItem = nil
         self.currentNode = self:_loadNodeFromSource(previous.source)
         if type(self.currentNode) == "table" then
             self.currentNode.breadcrumb = previous.breadcrumb
@@ -2114,6 +2347,7 @@ function App:wakeup()
     end
 
     self:_refreshSnapshot()
+    self:_serviceAppMsp()
 
     if self.startupLoaderStage == 1 then
         if self.currentNode == nil and self:_consumePreparedStartupRoot() ~= true then
@@ -2206,6 +2440,7 @@ function App:onDeactivate()
     safeFormClear()
     self:_clearFormRefs()
     self.currentNode = nil
+    self.currentNodeItem = nil
     self.pathStack = {}
     self.maskCache = {}
     self.maskCacheOrder = {}
@@ -2232,6 +2467,7 @@ function App:close()
     safeFormClear()
     self:_clearFormRefs()
     self.currentNode = nil
+    self.currentNodeItem = nil
     self.pathStack = nil
     self.snapshot = nil
     self.telemetryTask = nil

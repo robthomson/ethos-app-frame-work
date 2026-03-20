@@ -67,6 +67,30 @@ function api.load(name)
     return api.loaded[name]
 end
 
+function api.create(name)
+    local ok
+    local moduleOrErr
+    local pathModule
+    local pathErr
+
+    if not name or name == "" then
+        return nil, "api_name_required"
+    end
+
+    package.loaded["mspapi.definitions." .. name] = nil
+
+    ok, moduleOrErr = pcall(require, "mspapi.definitions." .. name)
+    if not ok then
+        pathModule, pathErr = loadDefinitionFromPath(name)
+        if not pathModule then
+            return nil, tostring(moduleOrErr) .. " | fallback: " .. tostring(pathErr)
+        end
+        moduleOrErr = pathModule
+    end
+
+    return moduleOrErr
+end
+
 function api.get(name)
     return api.load(name)
 end
