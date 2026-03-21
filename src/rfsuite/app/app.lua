@@ -7,6 +7,7 @@ local App = {}
 local ethos_events = require("framework.utils.ethos_events")
 local callbackFactory = require("framework.core.callback")
 local AudioLib = require("lib.audio")
+local log = require("framework.utils.log")
 
 local MENU_ROOT_PATH = "app/menu/root.lua"
 local MASK_CACHE_MAX = 16
@@ -97,6 +98,13 @@ local function isMenuKeyEvent(value)
         "KEY_RTN",
         "KEY_RTN_FIRST",
         "KEY_RTN_BREAK"
+    })
+end
+
+local function isRotaryNavigationEvent(value)
+    return ethos_events.matchesAnyConstant(value, {
+        "KEY_ROTARY_LEFT",
+        "KEY_ROTARY_RIGHT"
     })
 end
 
@@ -226,6 +234,10 @@ function App:init(framework)
     self.pageDirty = false
     self.dirtySuspendDepth = 0
     self.returnMenuArmed = false
+    self.pendingFocusRestore = false
+    self.pendingDialogAction = nil
+    self.pendingDialogActionReady = false
+    self.modalDialogDepth = 0
     self.formBuildCount = 0
     self.mspTask = nil
     self.loader = {
@@ -576,6 +588,103 @@ function App:_focusNavigationButton(key)
     return false
 end
 
+function App:_modalUiActive()
+    return (self.loader and self.loader.active and self.loader.active.modal == true)
+        or ((self.modalDialogDepth or 0) > 0)
+end
+
+function App:_openManagedDialog(options)
+    local opts = type(options) == "table" and options or {}
+    local buttons = {}
+    local index
+    local button
+    local originalAction
+
+    if not (form and form.openDialog) then
+        return nil
+    end
+
+    self.modalDialogDepth = (self.modalDialogDepth or 0) + 1
+
+    for index = 1, #(opts.buttons or {}) do
+        button = {}
+        for key, value in pairs(opts.buttons[index]) do
+            button[key] = value
+        end
+        originalAction = button.action
+        button.action = function(...)
+            self.modalDialogDepth = math.max(0, (self.modalDialogDepth or 0) - 1)
+            if type(originalAction) == "function" then
+                return originalAction(...)
+            end
+            return true
+        end
+        buttons[#buttons + 1] = button
+    end
+
+    opts.buttons = buttons
+    return form.openDialog(opts)
+end
+
+function App:_requestAppFocusRestore()
+    self.pendingFocusRestore = true
+end
+
+function App:_hasMenuButtons()
+    return next(self.buttonFields or {}) ~= nil
+end
+
+function App:_restoreAppFocus()
+    local items = self.currentNode and self.currentNode.items or nil
+    local selectedIndex = self:_getSelectedIndex(self.currentNodeSource)
+    local buttonIndex = 0
+    local firstEnabledField = nil
+    local selectedField = nil
+    local selectedEnabled = false
+    local item
+    local field
+    local enabled
+
+    if self:_modalUiActive() == true then
+        return false
+    end
+
+    if type(items) == "table" and next(self.buttonFields or {}) ~= nil then
+        for _, item in ipairs(items) do
+            if item.kind == "menu" or item.kind == "page" then
+                buttonIndex = buttonIndex + 1
+                field = self.buttonFields[buttonIndex]
+                enabled = self:_itemEnabled(item)
+                if enabled and firstEnabledField == nil and field then
+                    firstEnabledField = field
+                end
+                if buttonIndex == selectedIndex then
+                    selectedField = field
+                    selectedEnabled = enabled == true
+                end
+            end
+        end
+
+        if selectedEnabled == true and selectedField and selectedField.focus then
+            pcall(selectedField.focus, selectedField)
+            self.pendingFocusRestore = false
+            return true
+        end
+        if firstEnabledField and firstEnabledField.focus then
+            pcall(firstEnabledField.focus, firstEnabledField)
+            self.pendingFocusRestore = false
+            return true
+        end
+    end
+
+    if self:_focusNavigationButton("menu") == true then
+        self.pendingFocusRestore = false
+        return true
+    end
+
+    return false
+end
+
 function App:setPageDirty(isDirty)
     self.pageDirty = isDirty == true
     self:_syncSaveButtonState()
@@ -603,6 +712,8 @@ function App:_confirmAction(title, message, action)
         return action()
     end
 
+    self.modalDialogDepth = (self.modalDialogDepth or 0) + 1
+
     form.openDialog({
         width = nil,
         title = title,
@@ -611,12 +722,16 @@ function App:_confirmAction(title, message, action)
             {
                 label = "OK",
                 action = function()
-                    return action()
+                    self.modalDialogDepth = math.max(0, (self.modalDialogDepth or 0) - 1)
+                    self.pendingDialogAction = action
+                    self.pendingDialogActionReady = false
+                    return true
                 end
             },
             {
                 label = "Cancel",
                 action = function()
+                    self.modalDialogDepth = math.max(0, (self.modalDialogDepth or 0) - 1)
                     return true
                 end
             }
@@ -643,10 +758,13 @@ function App:_handleSaveAction()
     end
 
     local function runSave()
+        log:info("[save-confirm] runSave")
         result = self:_runNodeHook(self.currentNode, "save")
         if result == false then
+            log:info("[save-confirm] runSave result false")
             return false
         end
+        log:info("[save-confirm] runSave result true")
         self:setPageDirty(false)
         return true
     end
@@ -1125,8 +1243,15 @@ function App:_refreshLoaderState()
     self.loader.status = nil
     if active then
         self:_syncLoaderDialog()
-    elseif focusMenuOnClose == true then
-        self:_focusNavigationButton("menu")
+    else
+        if focusMenuOnClose == true then
+            if self:_modalUiActive() == true then
+                self.pendingFocusRestore = true
+            else
+                self.pendingFocusRestore = false
+                self:_focusNavigationButton("menu")
+            end
+        end
     end
     signature = self:_loaderSignature(active)
     self.loader.signature = signature
@@ -1271,8 +1396,15 @@ function App:clearLoader(force)
     end
 
     self:_refreshLoaderState()
-    if focusMenuOnClose == true and self.loader.active == nil then
-        self:_focusNavigationButton("menu")
+    if self.loader.active == nil then
+        if focusMenuOnClose == true then
+            if self:_modalUiActive() == true then
+                self.pendingFocusRestore = true
+            else
+                self.pendingFocusRestore = false
+                self:_focusNavigationButton("menu")
+            end
+        end
     end
     return true
 end
@@ -1581,10 +1713,12 @@ function App:_syncMenuButtonStates()
 
     self.menuEnableSignature = signature
 
-    if signatureChanged and selectedEnabled ~= true and firstEnabledField and firstEnabledField.focus then
+    if (signatureChanged or self.pendingFocusRestore == true) and selectedEnabled ~= true and firstEnabledField and firstEnabledField.focus then
         firstEnabledField:focus()
-    elseif signatureChanged and selectedEnabled == true and selectedField and selectedField.focus then
+        self.pendingFocusRestore = false
+    elseif (signatureChanged or self.pendingFocusRestore == true) and selectedEnabled == true and selectedField and selectedField.focus then
         selectedField:focus()
+        self.pendingFocusRestore = false
     end
 end
 
@@ -1910,7 +2044,7 @@ function App:_makeLoadErrorNode(item, breadcrumb, err)
             end
 
             node.state.errorDialogShown = true
-            form.openDialog({
+            self:_openManagedDialog({
                 width = nil,
                 title = "Load Error",
                 message = tostring(err),
@@ -2019,6 +2153,7 @@ function App:_enterItem(index, item)
     end
 
     self:setPageDirty(false)
+    self:_requestAppFocusRestore()
     self:_afterNodeChanged()
     self:_invalidateForm()
 end
@@ -2043,6 +2178,7 @@ function App:_goBack()
         end
     end
     self:setPageDirty(false)
+    self:_requestAppFocusRestore()
     self:_afterNodeChanged()
     self:_invalidateForm()
     return true
@@ -2330,11 +2466,17 @@ function App:_buildNodeForm()
             self:_addStaticLine("Error", "Page builder failed")
         end
         self:_syncSaveButtonState()
+        if self.pendingFocusRestore == true then
+            self:_restoreAppFocus()
+        end
         return
     end
 
     self:_buildGridButtons(node.items or {})
     self:_syncSaveButtonState()
+    if self.pendingFocusRestore == true then
+        self:_restoreAppFocus()
+    end
 end
 
 function App:_rebuildFormIfNeeded()
@@ -2359,6 +2501,19 @@ function App:wakeup()
     end
 
     self:_refreshSnapshot()
+
+    if self.pendingDialogAction and self:_modalUiActive() ~= true and self.pendingDialogActionReady ~= true then
+        log:info("[save-confirm] action ready")
+        self.pendingDialogActionReady = true
+    elseif self.pendingDialogAction and self:_modalUiActive() ~= true then
+        local pendingAction = self.pendingDialogAction
+        self.pendingDialogAction = nil
+        self.pendingDialogActionReady = false
+        log:info("[save-confirm] running action")
+        pendingAction()
+    elseif self:_modalUiActive() == true then
+        self.pendingDialogActionReady = false
+    end
 
     if self.startupLoaderStage == 1 then
         if self.currentNode == nil and self:_consumePreparedStartupRoot() ~= true then
@@ -2398,6 +2553,14 @@ end
 function App:event(category, value, x, y)
     local _ = x
     _ = y
+
+    if isRotaryNavigationEvent(value) == true then
+        self.pendingFocusRestore = false
+    end
+
+    if (self.modalDialogDepth or 0) > 0 then
+        return false
+    end
 
     if isMenuKeyEvent(value) ~= true then
         self.returnMenuArmed = false
@@ -2445,6 +2608,9 @@ end
 function App:onActivate()
     DIRTY_OWNER = self
     self.returnMenuArmed = false
+    self.pendingDialogAction = nil
+    self.pendingDialogActionReady = false
+    self.modalDialogDepth = 0
     if self.loader.active then
         self:_closeLoaderDialog(self.loader.active.handle)
     end
@@ -2465,6 +2631,9 @@ function App:onDeactivate()
         DIRTY_OWNER = nil
     end
     self.returnMenuArmed = false
+    self.pendingDialogAction = nil
+    self.pendingDialogActionReady = false
+    self.modalDialogDepth = 0
     if self.loader.active then
         self:_closeLoaderDialog(self.loader.active.handle)
     end
@@ -2493,6 +2662,9 @@ function App:close()
         DIRTY_OWNER = nil
     end
     self.returnMenuArmed = false
+    self.pendingDialogAction = nil
+    self.pendingDialogActionReady = false
+    self.modalDialogDepth = 0
     if self.loader.active then
         self:_closeLoaderDialog(self.loader.active.handle)
     end
