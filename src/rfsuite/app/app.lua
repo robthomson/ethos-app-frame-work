@@ -586,9 +586,69 @@ function App:_loadMask(path)
     return mask
 end
 
+function App:_clearMaskCache()
+    local index
+    local path
+
+    if type(self.maskCacheOrder) == "table" then
+        for index = #self.maskCacheOrder, 1, -1 do
+            path = self.maskCacheOrder[index]
+            self.maskCacheOrder[index] = nil
+            if type(self.maskCache) == "table" then
+                self.maskCache[path] = nil
+            end
+        end
+    elseif type(self.maskCache) == "table" then
+        for path in pairs(self.maskCache) do
+            self.maskCache[path] = nil
+        end
+    end
+end
+
 function App:_pruneMaskCacheForNode(node)
-    local _ = node
-    return
+    local keep = {}
+    local navButtons = type(node) == "table" and node.navButtons or nil
+    local items = type(node) == "table" and node.items or nil
+    local path
+    local i
+    local key
+    local value
+    local writeIndex = 1
+
+    if type(items) == "table" then
+        for i = 1, #items do
+            path = items[i] and items[i].image or nil
+            if type(path) == "string" and path ~= "" then
+                keep[path] = true
+            end
+        end
+    end
+
+    if type(navButtons) == "table" then
+        for _, key in ipairs({"menu", "save", "reload", "tool", "help"}) do
+            value = navButtons[key]
+            if type(value) == "table" then
+                path = value.icon
+                if type(path) == "string" and path ~= "" then
+                    keep[path] = true
+                end
+            end
+        end
+    end
+
+    for i = 1, #(self.maskCacheOrder or {}) do
+        path = self.maskCacheOrder[i]
+        if keep[path] == true then
+            self.maskCacheOrder[writeIndex] = path
+            writeIndex = writeIndex + 1
+        else
+            self.maskCache[path] = nil
+        end
+    end
+
+    for i = writeIndex, #(self.maskCacheOrder or {}) do
+        self.maskCacheOrder[i] = nil
+    end
 end
 
 function App:_afterNodeChanged()
