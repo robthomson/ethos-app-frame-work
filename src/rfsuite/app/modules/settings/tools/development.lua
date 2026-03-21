@@ -172,6 +172,9 @@ local function readState(framework)
     if state.logmsp == nil then
         state.logmsp = false
     end
+    if state.logevents == nil then
+        state.logevents = false
+    end
     if state.idleGcEnabled == nil then
         state.idleGcEnabled = config.idleGcEnabled == true
     end
@@ -242,6 +245,14 @@ function Page:open(ctx)
             end,
             function(newValue)
                 state.logmsp = newValue
+            end)
+
+        addBoolean(nil, "Log Events",
+            function()
+                return prefBool(state.logevents, false)
+            end,
+            function(newValue)
+                state.logevents = newValue
             end)
 
         addChoice(nil, "Simulation API Version", API_VERSION_CHOICES,

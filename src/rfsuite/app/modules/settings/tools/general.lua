@@ -179,7 +179,7 @@ function Page:open(ctx)
 
         addBoolean(safetyPanel, "Confirm Before Save",
             function()
-                return prefBool(state.save_confirm, false)
+                return prefBool(state.save_confirm, true)
             end,
             function(newValue)
                 state.save_confirm = newValue

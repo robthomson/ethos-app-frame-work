@@ -34,13 +34,18 @@ runtime.config = {
             debugMode = false,
             enableProfiling = false,
             iconsize = 1,
-            shortcuts_mixed_in = true
+            shortcuts_mixed_in = true,
+            save_confirm = true,
+            save_dirty_only = true,
+            save_armed_warning = true,
+            reload_confirm = false
         },
         developer = {
             memstats = false,
             taskprofiler = false,
             apiversion = 2,
             logmsp = false,
+            logevents = false,
             loglevel = "info",
             mspexpbytes = 8
         },

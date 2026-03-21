@@ -85,6 +85,55 @@ local function isCloseEvent(category, value)
     return ethos_events.isCloseEvent(category, value)
 end
 
+local function isSaveKeyEvent(value)
+    return ethos_events.matchesAnyConstant(value, {
+        "KEY_ENTER_LONG",
+        "KEY_PAGE_LONG"
+    })
+end
+
+local function isMenuKeyEvent(value)
+    return ethos_events.matchesAnyConstant(value, {
+        "KEY_RTN",
+        "KEY_RTN_FIRST",
+        "KEY_RTN_BREAK"
+    })
+end
+
+local function isExitLongEvent(value)
+    return ethos_events.matchesAnyConstant(value, {
+        "KEY_RTN_LONG"
+    })
+end
+
+local function suppressFollowupKeyEvent(value)
+    local breakName = nil
+    local breakValue
+
+    if not (system and system.killEvents) then
+        return
+    end
+
+    if ethos_events.matchesConstant(value, "KEY_ENTER_LONG") then
+        breakName = "KEY_ENTER_BREAK"
+    elseif ethos_events.matchesConstant(value, "KEY_PAGE_LONG") then
+        breakName = "KEY_PAGE_BREAK"
+    elseif ethos_events.matchesConstant(value, "KEY_RTN") or ethos_events.matchesConstant(value, "KEY_RTN_FIRST") then
+        breakName = "KEY_RTN_BREAK"
+    elseif ethos_events.matchesConstant(value, "KEY_RTN_LONG") then
+        breakName = "KEY_RTN_BREAK"
+    end
+
+    if breakName == nil then
+        return
+    end
+
+    breakValue = ethos_events.getConstant(breakName)
+    if breakValue ~= nil then
+        pcall(system.killEvents, breakValue)
+    end
+end
+
 local function formatValue(value, format)
     if value == nil then
         return "--"
@@ -176,6 +225,7 @@ function App:init(framework)
     self.maskCacheOrder = {}
     self.pageDirty = false
     self.dirtySuspendDepth = 0
+    self.returnMenuArmed = false
     self.formBuildCount = 0
     self.mspTask = nil
     self.loader = {
@@ -285,7 +335,7 @@ function App:_collapseNavigation()
 end
 
 function App:_confirmBeforeSave()
-    return self:_generalBool("save_confirm", false)
+    return self:_generalBool("save_confirm", true)
 end
 
 function App:_confirmBeforeReload()
@@ -580,9 +630,16 @@ end
 
 function App:_handleSaveAction()
     local result
+    local customResult
+    local handled
 
     if not self:_canSaveNode(self.currentNode) then
         return false
+    end
+
+    customResult, handled = self:_runNodeHook(self.currentNode, "onSaveMenu")
+    if handled == true then
+        return customResult ~= false
     end
 
     local function runSave()
@@ -603,6 +660,13 @@ end
 
 function App:_handleReloadAction()
     local result
+    local customResult
+    local handled
+
+    customResult, handled = self:_runNodeHook(self.currentNode, "onReloadMenu")
+    if handled == true then
+        return customResult ~= false
+    end
 
     local function runReload()
         result = self:_runNodeHook(self.currentNode, "reload")
@@ -618,6 +682,61 @@ function App:_handleReloadAction()
     end
 
     return runReload()
+end
+
+function App:_handleMenuAction()
+    local result
+    local handled
+
+    result, handled = self:_runNodeHook(self.currentNode, "onNavMenu")
+    if handled == true then
+        return result ~= false
+    end
+
+    result, handled = self:_runNodeHook(self.currentNode, "menu")
+    if handled == true then
+        return result ~= false
+    end
+
+    if #self.pathStack == 0 then
+        return self:_requestExit()
+    end
+
+    return self:_goBack()
+end
+
+function App:_handleToolAction()
+    local result
+    local handled
+
+    result, handled = self:_runNodeHook(self.currentNode, "onToolMenu")
+    if handled == true then
+        return result ~= false
+    end
+
+    result, handled = self:_runNodeHook(self.currentNode, "tool")
+    if handled == true then
+        return result ~= false
+    end
+
+    return false
+end
+
+function App:_handleHelpAction()
+    local result
+    local handled
+
+    result, handled = self:_runNodeHook(self.currentNode, "onHelpMenu")
+    if handled == true then
+        return result ~= false
+    end
+
+    result, handled = self:_runNodeHook(self.currentNode, "help")
+    if handled == true then
+        return result ~= false
+    end
+
+    return false
 end
 
 function App:_runNodeHook(node, hookName, ...)
@@ -2005,11 +2124,7 @@ function App:_addNavigationButtons()
             visible = navConfig.menu.enabled == true,
             icon = navConfig.menu.icon,
             press = function()
-                if atRoot then
-                    self:_requestExit()
-                else
-                    self:_goBack()
-                end
+                self:_handleMenuAction()
             end
         },
         {
@@ -2039,7 +2154,7 @@ function App:_addNavigationButtons()
             visible = navConfig.tool.enabled == true,
             icon = navConfig.tool.icon,
             press = function()
-                self:_runNodeHook(self.currentNode, "tool")
+                self:_handleToolAction()
             end
         },
         {
@@ -2049,7 +2164,7 @@ function App:_addNavigationButtons()
             visible = navConfig.help.enabled == true,
             icon = navConfig.help.icon,
             press = function()
-                self:_runNodeHook(self.currentNode, "help")
+                self:_handleHelpAction()
             end
         }
     }
@@ -2283,11 +2398,40 @@ end
 function App:event(category, value, x, y)
     local _ = x
     _ = y
-    if isCloseEvent(category, value) then
-        if self:_goBack() then
+
+    if isMenuKeyEvent(value) ~= true then
+        self.returnMenuArmed = false
+    end
+
+    if isExitLongEvent(value) then
+        suppressFollowupKeyEvent(value)
+        return self:_requestExit()
+    end
+    if isMenuKeyEvent(value) then
+        if self.returnMenuArmed == true then
+            self.returnMenuArmed = false
+            return self:_handleMenuAction()
+        end
+        if self:_focusNavigationButton("menu") == true then
+            self.returnMenuArmed = true
+            suppressFollowupKeyEvent(value)
             return true
         end
-        return self:_requestExit()
+        return self:_handleMenuAction()
+    end
+    if isCloseEvent(category, value) then
+        return self:_handleMenuAction()
+    end
+    if isSaveKeyEvent(value) then
+        if self.loader and self.loader.active and self.loader.active.modal == true then
+            suppressFollowupKeyEvent(value)
+            return true
+        end
+        if self:_navButtonsForNode(self.currentNode).save.enabled == true then
+            self:_handleSaveAction()
+        end
+        suppressFollowupKeyEvent(value)
+        return true
     end
     if self.loader and self.loader.active and self.loader.active.modal == true then
         return true
@@ -2300,6 +2444,7 @@ end
 
 function App:onActivate()
     DIRTY_OWNER = self
+    self.returnMenuArmed = false
     if self.loader.active then
         self:_closeLoaderDialog(self.loader.active.handle)
     end
@@ -2319,6 +2464,7 @@ function App:onDeactivate()
     if DIRTY_OWNER == self then
         DIRTY_OWNER = nil
     end
+    self.returnMenuArmed = false
     if self.loader.active then
         self:_closeLoaderDialog(self.loader.active.handle)
     end
@@ -2346,6 +2492,7 @@ function App:close()
     if DIRTY_OWNER == self then
         DIRTY_OWNER = nil
     end
+    self.returnMenuArmed = false
     if self.loader.active then
         self:_closeLoaderDialog(self.loader.active.handle)
     end

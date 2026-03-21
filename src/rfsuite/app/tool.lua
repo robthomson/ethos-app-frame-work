@@ -27,8 +27,16 @@ function tool.paint()
     runtime.paintApp()
 end
 
-function tool.event(category, value, x, y)
-    ethos_events.debug("app", category, value, x, y, {throttleSame = true})
+function tool.event(widget, category, value, x, y)
+    local _ = widget
+    local fw = runtime.ensureFramework()
+    local developer = fw and fw.preferences and fw.preferences:section("developer", {}) or {}
+
+    if developer.logevents == true or developer.logevents == "true" then
+        ethos_events.debug("app", category, value, x, y, {throttleSame = true, level = "info"})
+    else
+        ethos_events.debug("app", category, value, x, y, {throttleSame = true})
+    end
     return runtime.eventApp(category, value, x, y)
 end
 
