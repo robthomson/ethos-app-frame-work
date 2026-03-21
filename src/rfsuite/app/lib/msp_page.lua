@@ -1439,6 +1439,7 @@ function MspPage.create(spec)
                 kind = "progress",
                 message = "Loading values.",
                 closeWhenIdle = false,
+                transferInfo = true,
                 focusMenuOnClose = true,
                 modal = true
             },
@@ -1607,6 +1608,7 @@ function MspPage.create(spec)
                     title = self.baseTitle,
                     message = "Loading values.",
                     closeWhenIdle = false,
+                    transferInfo = true,
                     focusMenuOnClose = true,
                     modal = true
                 })
@@ -1662,6 +1664,7 @@ function MspPage.create(spec)
                 title = self.baseTitle,
                 message = "Saving values.",
                 closeWhenIdle = false,
+                transferInfo = true,
                 modal = true
             })
 

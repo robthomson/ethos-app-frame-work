@@ -41,7 +41,9 @@ function codec.new()
         rxSize = 0,
         rxRequest = 0,
         rxStarted = false,
-        rxCrc = 0
+        rxCrc = 0,
+        crcErrorCount = 0,
+        lastRxCommand = 0
     }, {__index = codec})
 end
 
@@ -67,6 +69,7 @@ function codec:clear()
     self.rxStarted = false
     self.rxSeq = 0
     self.rxCrc = 0
+    self.lastRxCommand = 0
 end
 
 function codec:sendRequest(command, payload)
@@ -229,11 +232,14 @@ function codec:_receiveReply(packet, maxRx)
     if self.protocolVersion == 1 then
         local rxCrc = packet[idx] or 0
         if self.rxCrc ~= rxCrc and versionBits == 0 then
+            self.crcErrorCount = (tonumber(self.crcErrorCount) or 0) + 1
+            self.lastRxCommand = self.rxRequest or self.lastRequest or 0
             self:_resetRx()
             return nil
         end
     end
 
+    self.lastRxCommand = self.rxRequest or 0
     self.lastRequest = 0
     return true
 end

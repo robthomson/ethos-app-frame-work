@@ -24,6 +24,7 @@ local LOADER_PROGRESS_MULTIPLIER = 2.0
 local MENU_LOADER_PROGRESS_FACTOR = 4.0
 local LOADER_TIMEOUT_MESSAGE = "Error: timed out"
 local LOADER_TIMEOUT_DETAIL = "Press close to continue."
+local MSP_DEBUG_PLACEHOLDER = "MSP Waiting"
 local DIRTY_WRAPPERS_INSTALLED = false
 local DIRTY_OWNER = nil
 local unpack_fn = table.unpack or unpack
@@ -1027,9 +1028,21 @@ function App:_loaderMessage(state)
     local parts = {}
     local base = self:_loaderText(state.message, "Working.")
     local detail = self:_loaderText(state.detail, "")
-    local lines = state.debug ~= false and self:_generalBool("mspstatusdialog", true) == true and self:_mspDebugLines() or nil
+    local transferStatus = state.transferInfo == true
+        and state.timedOut ~= true
+        and state.debug ~= false
+        and self:_generalBool("mspstatusdialog", true) == true
+        and self:_mspTransferStatus()
+        or nil
+    local lines = transferStatus == nil
+        and state.debug ~= false
+        and self:_generalBool("mspstatusdialog", true) == true
+        and self:_mspDebugLines()
+        or nil
 
-    if base ~= "" then
+    if transferStatus ~= nil and transferStatus ~= "" then
+        parts[#parts + 1] = transferStatus
+    elseif base ~= "" then
         parts[#parts + 1] = base
     end
     if detail ~= "" then
@@ -1046,6 +1059,93 @@ function App:_loaderMessage(state)
     end
 
     return table.concat(parts, "\n")
+end
+
+function App:_mspTransferStatus()
+    local session = self.framework and self.framework.session
+    local now = os.clock()
+    local clearAt
+    local updatedAt
+    local status
+    local last
+    local extras
+
+    if not session then
+        return MSP_DEBUG_PLACEHOLDER
+    end
+
+    clearAt = tonumber(session:get("mspStatusClearAt", 0)) or 0
+    if clearAt > 0 and now >= clearAt then
+        session:unset("mspStatusMessage")
+        session:unset("mspStatusClearAt")
+    end
+
+    status = session:get("mspStatusMessage", nil)
+    last = session:get("mspStatusLast", nil)
+    updatedAt = tonumber(session:get("mspStatusUpdatedAt", 0)) or 0
+
+    if not status and last and updatedAt > 0 and (now - updatedAt) < 0.75 then
+        status = last
+    end
+
+    if type(status) == "string" and status ~= "" then
+        extras = self:_mspTransferExtras()
+        if extras then
+            return status .. " " .. extras
+        end
+        return status
+    end
+
+    extras = self:_mspTransferExtras()
+    if extras then
+        return extras
+    end
+
+    return MSP_DEBUG_PLACEHOLDER
+end
+
+function App:_mspTransferExtras()
+    local session = self.framework and self.framework.session
+    local mspTask = self:_msp()
+    local queue = mspTask and mspTask.queue or nil
+    local parts = {}
+    local tx
+    local rx
+    local retries
+    local crc
+    local timeoutCount
+
+    if not session then
+        return nil
+    end
+
+    tx = tonumber(session:get("mspLastTxCommand", 0)) or 0
+    rx = tonumber(session:get("mspLastRxCommand", 0)) or 0
+    retries = queue and tonumber(queue.retryCount) or 0
+    crc = tonumber(session:get("mspCrcErrors", 0)) or 0
+    timeoutCount = tonumber(session:get("mspTimeouts", 0)) or 0
+
+    if tx > 0 then
+        parts[#parts + 1] = "Transmit " .. tostring(tx)
+    end
+    if rx > 0 then
+        parts[#parts + 1] = "Receive " .. tostring(rx)
+    end
+    if retries > 1 then
+        parts[#parts + 1] = "Retry " .. tostring(retries - 1)
+    end
+    if crc > 0 then
+        parts[#parts + 1] = "CRC " .. tostring(crc)
+    end
+    if timeoutCount > 0 then
+        parts[#parts + 1] = "Timeout " .. tostring(timeoutCount)
+    end
+
+    if #parts == 0 then
+        return nil
+    end
+
+    return table.concat(parts, " ")
 end
 
 function App:_syncLoaderDialog()
@@ -1346,6 +1446,7 @@ function App:showLoader(options)
         restoreFocusOnClose = opts.restoreFocusOnClose == true,
         timedOut = false,
         debug = opts.debug ~= false,
+        transferInfo = opts.transferInfo == true,
         progressCounter = 0,
         progressValue = tonumber(opts.progressValue)
     }
@@ -1382,6 +1483,9 @@ function App:updateLoader(options)
     end
     if opts.allowClose ~= nil then
         active.allowClose = opts.allowClose == true
+    end
+    if opts.transferInfo ~= nil then
+        active.transferInfo = opts.transferInfo == true
     end
     if opts.progressValue ~= nil then
         active.progressValue = tonumber(opts.progressValue)
