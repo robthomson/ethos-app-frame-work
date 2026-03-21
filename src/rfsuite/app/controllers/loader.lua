@@ -30,12 +30,7 @@ function controller.new(shared, options)
         timeoutMessage = tostring(opts.timeoutMessage or "Error: timed out"),
         timeoutDetail = tostring(opts.timeoutDetail or "Press close to continue."),
         transferPlaceholder = tostring(opts.transferPlaceholder or "MSP Waiting"),
-        audio = opts.audio,
-        generalBool = opts.generalBool,
-        mspTask = opts.mspTask,
-        modalUiActive = opts.modalUiActive,
-        focusNavigationButton = opts.focusNavigationButton,
-        restoreAppFocus = opts.restoreAppFocus
+        audio = opts.audio
     }, controller_mt)
 end
 
@@ -95,17 +90,22 @@ function controller:_closeDialog(handle)
 end
 
 function controller:_generalBool(key, default)
-    if type(self.generalBool) ~= "function" then
+    local app = self:_app()
+
+    if not (app and app._generalBool) then
         return default
     end
-    return self.generalBool(key, default)
+    return app:_generalBool(key, default)
 end
 
 function controller:_msp()
-    if type(self.mspTask) ~= "function" then
-        return nil
+    local app = self:_app()
+
+    if app and app._msp then
+        return app:_msp()
     end
-    return self.mspTask()
+
+    return nil
 end
 
 function controller:_transferExtras()
@@ -396,7 +396,7 @@ end
 
 function controller:_applyFocusRestore(focusMenuOnClose, restoreFocusOnClose)
     local app = self:_app()
-    local modalUiActive = type(self.modalUiActive) == "function" and self.modalUiActive() == true
+    local modalUiActive = app and app._modalUiActive and app:_modalUiActive() == true
 
     if not app then
         return
@@ -407,8 +407,8 @@ function controller:_applyFocusRestore(focusMenuOnClose, restoreFocusOnClose)
             app.pendingFocusRestore = true
         else
             app.pendingFocusRestore = false
-            if type(self.focusNavigationButton) == "function" then
-                self.focusNavigationButton("menu")
+            if app._focusNavigationButton then
+                app:_focusNavigationButton("menu")
             end
         end
     elseif restoreFocusOnClose == true then
@@ -416,8 +416,8 @@ function controller:_applyFocusRestore(focusMenuOnClose, restoreFocusOnClose)
             app.pendingFocusRestore = true
         else
             app.pendingFocusRestore = true
-            if type(self.restoreAppFocus) == "function" then
-                self.restoreAppFocus()
+            if app._restoreAppFocus then
+                app:_restoreAppFocus()
             end
         end
     end

@@ -12,20 +12,6 @@ function controller.new(shared, options)
     return setmetatable({
         shared = shared,
         menuRootPath = opts.menuRootPath or "app/menu/root.lua",
-        onSyncState = opts.onSyncState,
-        loadRootNode = opts.loadRootNode,
-        loadNodeFromSource = opts.loadNodeFromSource,
-        loadPageNode = opts.loadPageNode,
-        makeLeafNode = opts.makeLeafNode,
-        closeNode = opts.closeNode,
-        afterNodeChanged = opts.afterNodeChanged,
-        invalidateForm = opts.invalidateForm,
-        setPageDirty = opts.setPageDirty,
-        requestAppFocusRestore = opts.requestAppFocusRestore,
-        setSelectedIndex = opts.setSelectedIndex,
-        showLoader = opts.showLoader,
-        updateLoader = opts.updateLoader,
-        clearLoader = opts.clearLoader,
         state = {
             currentNode = nil,
             currentNodeSource = opts.menuRootPath or "app/menu/root.lua",
@@ -34,9 +20,15 @@ function controller.new(shared, options)
     }, controller_mt)
 end
 
+function controller:_app()
+    return self.shared and self.shared.app or nil
+end
+
 function controller:_sync()
-    if type(self.onSyncState) == "function" then
-        self.onSyncState(self.state)
+    local app = self:_app()
+
+    if app and app._syncPageHostState then
+        app:_syncPageHostState(self.state)
     end
 end
 
@@ -48,14 +40,16 @@ function controller:reset()
 end
 
 function controller:ensureCurrentNode()
-    if self.state.currentNode == nil and type(self.loadRootNode) == "function" then
+    local app = self:_app()
+
+    if self.state.currentNode == nil and app and app._loadRootNode then
         self.state.currentNodeSource = self.menuRootPath
-        self.state.currentNode = self.loadRootNode()
-        if type(self.afterNodeChanged) == "function" then
-            self.afterNodeChanged()
+        self.state.currentNode = app:_loadRootNode()
+        if app._afterNodeChanged then
+            app:_afterNodeChanged()
         end
-        if type(self.invalidateForm) == "function" then
-            self.invalidateForm()
+        if app._invalidateForm then
+            app:_invalidateForm()
         end
         self:_sync()
     end
@@ -64,26 +58,29 @@ function controller:ensureCurrentNode()
 end
 
 function controller:openRoot()
-    if type(self.closeNode) == "function" then
-        self.closeNode(self.state.currentNode)
+    local app = self:_app()
+
+    if app and app._closeNode then
+        app:_closeNode(self.state.currentNode)
     end
-    if type(self.setPageDirty) == "function" then
-        self.setPageDirty(false)
+    if app and app.setPageDirty then
+        app:setPageDirty(false)
     end
     self.state.pathStack = {}
     self.state.currentNodeSource = self.menuRootPath
-    self.state.currentNode = type(self.loadRootNode) == "function" and self.loadRootNode() or nil
-    if type(self.afterNodeChanged) == "function" then
-        self.afterNodeChanged()
+    self.state.currentNode = app and app._loadRootNode and app:_loadRootNode() or nil
+    if app and app._afterNodeChanged then
+        app:_afterNodeChanged()
     end
-    if type(self.invalidateForm) == "function" then
-        self.invalidateForm()
+    if app and app._invalidateForm then
+        app:_invalidateForm()
     end
     self:_sync()
     return self.state.currentNode
 end
 
 function controller:enterItem(index, item, breadcrumb)
+    local app = self:_app()
     local key
     local opts
 
@@ -91,16 +88,16 @@ function controller:enterItem(index, item, breadcrumb)
         return nil
     end
 
-    if type(self.setSelectedIndex) == "function" then
-        self.setSelectedIndex(self.state.currentNodeSource, index)
+    if app and app._setSelectedIndex then
+        app:_setSelectedIndex(self.state.currentNodeSource, index)
     end
     self.state.pathStack[#self.state.pathStack + 1] = {
         source = self.state.currentNodeSource,
         breadcrumb = self.state.currentNode and self.state.currentNode.breadcrumb or nil
     }
 
-    if item.kind == "page" and type(self.showLoader) == "function" then
-        self.showLoader({
+    if item.kind == "page" and app and app.showLoader then
+        app:showLoader({
             kind = "progress",
             title = item.title or item.id or "Loading",
             message = "Loading values.",
@@ -112,72 +109,73 @@ function controller:enterItem(index, item, breadcrumb)
 
     if item.kind == "menu" and type(item.source) == "string" then
         self.state.currentNodeSource = item.source
-        self.state.currentNode = type(self.loadNodeFromSource) == "function" and self.loadNodeFromSource(item.source) or nil
+        self.state.currentNode = app and app._loadNodeFromSource and app:_loadNodeFromSource(item.source) or nil
         if type(self.state.currentNode) == "table" then
             self.state.currentNode.breadcrumb = breadcrumb
         end
     elseif item.kind == "page" then
         self.state.currentNodeSource = "page:" .. tostring(item.path or item.id or index)
-        self.state.currentNode = type(self.loadPageNode) == "function" and self.loadPageNode(item, breadcrumb) or nil
-        if type(self.state.currentNode) == "table" and self.state.currentNode.showLoaderOnEnter == true and type(self.updateLoader) == "function" then
+        self.state.currentNode = app and app._loadPageNode and app:_loadPageNode(item, breadcrumb) or nil
+        if type(self.state.currentNode) == "table" and self.state.currentNode.showLoaderOnEnter == true and app and app.updateLoader then
             opts = {}
             for key, value in pairs(self.state.currentNode.loaderOnEnter or {}) do
                 opts[key] = value
             end
             opts.title = opts.title or self.state.currentNode.baseTitle or self.state.currentNode.title or item.title or item.id or "Loading"
-            self.updateLoader(opts)
-        elseif type(self.clearLoader) == "function" then
-            self.clearLoader(true)
+            app:updateLoader(opts)
+        elseif app and app.clearLoader then
+            app:clearLoader(true)
         end
     else
         self.state.currentNodeSource = "leaf:" .. tostring(item.id or index)
-        self.state.currentNode = type(self.makeLeafNode) == "function" and self.makeLeafNode(item, breadcrumb) or nil
+        self.state.currentNode = app and app._makeLeafNode and app:_makeLeafNode(item, breadcrumb) or nil
     end
 
-    if type(self.setPageDirty) == "function" then
-        self.setPageDirty(false)
+    if app and app.setPageDirty then
+        app:setPageDirty(false)
     end
-    if item.kind ~= "menu" and type(self.requestAppFocusRestore) == "function" then
-        self.requestAppFocusRestore()
+    if item.kind ~= "menu" and app and app._requestAppFocusRestore then
+        app:_requestAppFocusRestore()
     end
-    if type(self.afterNodeChanged) == "function" then
-        self.afterNodeChanged()
+    if app and app._afterNodeChanged then
+        app:_afterNodeChanged()
     end
-    if type(self.invalidateForm) == "function" then
-        self.invalidateForm()
+    if app and app._invalidateForm then
+        app:_invalidateForm()
     end
     self:_sync()
     return self.state.currentNode
 end
 
 function controller:goBack()
+    local app = self:_app()
     local previous = self.state.pathStack[#self.state.pathStack]
 
     if not previous then
         return false
     end
 
-    if type(self.closeNode) == "function" then
-        self.closeNode(self.state.currentNode)
+    if app and app._closeNode then
+        app:_closeNode(self.state.currentNode)
     end
     self.state.pathStack[#self.state.pathStack] = nil
     self.state.currentNodeSource = previous.source
     if previous.source == self.menuRootPath then
-        self.state.currentNode = type(self.loadRootNode) == "function" and self.loadRootNode() or nil
+        self.state.currentNode = app and app._loadRootNode and app:_loadRootNode() or nil
     else
-        self.state.currentNode = type(self.loadNodeFromSource) == "function" and self.loadNodeFromSource(previous.source) or nil
+        self.state.currentNode = app and app._loadNodeFromSource and app:_loadNodeFromSource(previous.source) or nil
         if type(self.state.currentNode) == "table" then
             self.state.currentNode.breadcrumb = previous.breadcrumb
         end
     end
-    if type(self.setPageDirty) == "function" then
-        self.setPageDirty(false)
+    if app and app.setPageDirty then
+        app:setPageDirty(false)
     end
-    if type(self.afterNodeChanged) == "function" then
-        self.afterNodeChanged()
+    if app and app._afterNodeChanged then
+        app:_afterNodeChanged()
     end
-    if type(self.invalidateForm) == "function" then
-        self.invalidateForm()
+    if app and app._invalidateForm then
+        app:_invalidateForm()
     end
     self:_sync()
     return true

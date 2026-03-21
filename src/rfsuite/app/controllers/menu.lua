@@ -18,14 +18,6 @@ function controller.new(shared, options)
     return setmetatable({
         shared = shared,
         menuRootPath = opts.menuRootPath or MENU_ROOT_PATH,
-        onSyncState = opts.onSyncState,
-        currentMenuAccessSignature = opts.currentMenuAccessSignature,
-        currentMenuEnableSignature = opts.currentMenuEnableSignature,
-        itemEnabled = opts.itemEnabled,
-        reloadCurrentMenuNode = opts.reloadCurrentMenuNode,
-        invalidateForm = opts.invalidateForm,
-        modalUiActive = opts.modalUiActive,
-        focusNavigationButton = opts.focusNavigationButton,
         state = {
             menuAccessSignature = nil,
             menuEnableSignature = nil,
@@ -34,9 +26,15 @@ function controller.new(shared, options)
     }, controller_mt)
 end
 
+function controller:_app()
+    return self.shared and self.shared.app or nil
+end
+
 function controller:_sync()
-    if type(self.onSyncState) == "function" then
-        self.onSyncState(self.state)
+    local app = self:_app()
+
+    if app and app._syncMenuState then
+        app:_syncMenuState(self.state)
     end
 end
 
@@ -165,28 +163,29 @@ function controller:collectNodeIconPaths(node)
 end
 
 function controller:_itemEnabled(item)
-    if type(self.itemEnabled) == "function" then
-        return self.itemEnabled(item)
+    local app = self:_app()
+
+    if app and app._itemEnabled then
+        return app:_itemEnabled(item)
     end
 
     return type(item) == "table" and item.disabled ~= true
 end
 
 function controller:refreshMenuAccess()
-    local signature = type(self.currentMenuAccessSignature) == "function"
-        and self.currentMenuAccessSignature()
-        or "default"
+    local app = self:_app()
+    local signature = app and app._currentMenuAccessSignatureLegacy and app:_currentMenuAccessSignatureLegacy() or "default"
 
     if self.state.menuAccessSignature == signature then
         return false
     end
 
     self.state.menuAccessSignature = signature
-    if type(self.reloadCurrentMenuNode) == "function" then
-        self.reloadCurrentMenuNode()
+    if app and app._reloadCurrentMenuNode then
+        app:_reloadCurrentMenuNode()
     end
-    if type(self.invalidateForm) == "function" then
-        self.invalidateForm()
+    if app and app._invalidateForm then
+        app:_invalidateForm()
     end
     self:_sync()
 
@@ -194,6 +193,7 @@ function controller:refreshMenuAccess()
 end
 
 function controller:restoreFocus(node, currentNodeSource, buttonFields)
+    local app = self:_app()
     local items = node and node.items or nil
     local selectedIndex = self:getSelectedIndex(currentNodeSource)
     local buttonIndex = 0
@@ -204,7 +204,7 @@ function controller:restoreFocus(node, currentNodeSource, buttonFields)
     local field
     local enabled
 
-    if type(self.modalUiActive) == "function" and self.modalUiActive() == true then
+    if app and app._modalUiActive and app:_modalUiActive() == true then
         return false
     end
 
@@ -236,7 +236,7 @@ function controller:restoreFocus(node, currentNodeSource, buttonFields)
         end
     end
 
-    if type(self.focusNavigationButton) == "function" and self.focusNavigationButton("menu") == true then
+    if app and app._focusNavigationButton and app:_focusNavigationButton("menu") == true then
         self:clearFocusRestore()
         return true
     end
@@ -245,15 +245,14 @@ function controller:restoreFocus(node, currentNodeSource, buttonFields)
 end
 
 function controller:syncButtonStates(node, currentNodeSource, buttonFields)
+    local app = self:_app()
     local buttonIndex = 0
     local items = node and node.items or nil
     local selectedIndex = self:getSelectedIndex(currentNodeSource)
     local firstEnabledField = nil
     local selectedField = nil
     local selectedEnabled = false
-    local signature = type(self.currentMenuEnableSignature) == "function"
-        and self.currentMenuEnableSignature()
-        or "default"
+    local signature = app and app._currentMenuEnableSignatureLegacy and app:_currentMenuEnableSignatureLegacy() or "default"
     local signatureChanged = (self.state.menuEnableSignature ~= signature)
     local item
     local field

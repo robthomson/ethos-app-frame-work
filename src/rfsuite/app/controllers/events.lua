@@ -69,87 +69,76 @@ local function suppressFollowupKeyEvent(value)
 end
 
 function controller.new(shared, options)
-    local opts = options or {}
-
     return setmetatable({
-        shared = shared,
-        clearFocusRestore = opts.clearFocusRestore,
-        getModalDialogDepth = opts.getModalDialogDepth,
-        isLoaderModalActive = opts.isLoaderModalActive,
-        getReturnMenuArmed = opts.getReturnMenuArmed,
-        setReturnMenuArmed = opts.setReturnMenuArmed,
-        requestExit = opts.requestExit,
-        focusNavigationButton = opts.focusNavigationButton,
-        handleMenuAction = opts.handleMenuAction,
-        handleSaveAction = opts.handleSaveAction,
-        navButtonsForNode = opts.navButtonsForNode,
-        getCurrentNode = opts.getCurrentNode,
-        runNodeHook = opts.runNodeHook
+        shared = shared
     }, controller_mt)
 end
 
-function controller:route(category, value, x, y)
-    local currentNode = type(self.getCurrentNode) == "function" and self.getCurrentNode() or nil
-    local returnMenuArmed = type(self.getReturnMenuArmed) == "function" and self.getReturnMenuArmed() == true or false
+function controller:_app()
+    return self.shared and self.shared.app or nil
+end
 
-    if isRotaryNavigationEvent(value) == true and type(self.clearFocusRestore) == "function" then
-        self.clearFocusRestore()
+function controller:route(category, value, x, y)
+    local app = self:_app()
+    local currentNode = app and app.currentNode or nil
+    local returnMenuArmed = app and app.returnMenuArmed == true or false
+
+    if isRotaryNavigationEvent(value) == true and app and app.menuController and app.menuController.clearFocusRestore then
+        app.menuController:clearFocusRestore()
     end
 
-    if type(self.getModalDialogDepth) == "function" and (self.getModalDialogDepth() or 0) > 0 then
+    if app and (app.modalDialogDepth or 0) > 0 then
         return false
     end
 
-    if isMenuKeyEvent(value) ~= true and type(self.setReturnMenuArmed) == "function" then
-        self.setReturnMenuArmed(false)
+    if isMenuKeyEvent(value) ~= true and app then
+        app.returnMenuArmed = false
         returnMenuArmed = false
     end
 
     if isExitLongEvent(value) then
         suppressFollowupKeyEvent(value)
-        return type(self.requestExit) == "function" and self.requestExit() or false
+        return app and app._requestExit and app:_requestExit() or false
     end
 
     if isMenuKeyEvent(value) then
         if returnMenuArmed == true then
-            if type(self.setReturnMenuArmed) == "function" then
-                self.setReturnMenuArmed(false)
+            if app then
+                app.returnMenuArmed = false
             end
-            return type(self.handleMenuAction) == "function" and self.handleMenuAction() or false
+            return app and app._handleMenuAction and app:_handleMenuAction() or false
         end
-        if type(self.focusNavigationButton) == "function" and self.focusNavigationButton("menu") == true then
-            if type(self.setReturnMenuArmed) == "function" then
-                self.setReturnMenuArmed(true)
+        if app and app._focusNavigationButton and app:_focusNavigationButton("menu") == true then
+            if app then
+                app.returnMenuArmed = true
             end
             suppressFollowupKeyEvent(value)
             return true
         end
-        return type(self.handleMenuAction) == "function" and self.handleMenuAction() or false
+        return app and app._handleMenuAction and app:_handleMenuAction() or false
     end
 
     if isCloseEvent(category, value) then
-        return type(self.handleMenuAction) == "function" and self.handleMenuAction() or false
+        return app and app._handleMenuAction and app:_handleMenuAction() or false
     end
 
     if isSaveKeyEvent(value) then
-        if type(self.isLoaderModalActive) == "function" and self.isLoaderModalActive() == true then
+        if app and app.loader and app.loader.active and app.loader.active.modal == true then
             suppressFollowupKeyEvent(value)
             return true
         end
-        if type(self.navButtonsForNode) == "function" and self.navButtonsForNode(currentNode).save.enabled == true then
-            if type(self.handleSaveAction) == "function" then
-                self.handleSaveAction()
-            end
+        if app and app._navButtonsForNode and app:_navButtonsForNode(currentNode).save.enabled == true and app._handleSaveAction then
+            app:_handleSaveAction()
         end
         suppressFollowupKeyEvent(value)
         return true
     end
 
-    if type(self.isLoaderModalActive) == "function" and self.isLoaderModalActive() == true then
+    if app and app.loader and app.loader.active and app.loader.active.modal == true then
         return true
     end
 
-    if type(self.runNodeHook) == "function" and self.runNodeHook(currentNode, "event", category, value, x, y) == true then
+    if app and app._runNodeHook and app:_runNodeHook(currentNode, "event", category, value, x, y) == true then
         return true
     end
 

@@ -354,398 +354,24 @@ function App:init(framework)
         timeoutMessage = LOADER_TIMEOUT_MESSAGE,
         timeoutDetail = LOADER_TIMEOUT_DETAIL,
         transferPlaceholder = MSP_DEBUG_PLACEHOLDER,
-        audio = AudioLib,
-        generalBool = function(key, default)
-            return self:_generalBool(key, default)
-        end,
-        mspTask = function()
-            return self:_msp()
-        end,
-        modalUiActive = function()
-            return self:_modalUiActive()
-        end,
-        focusNavigationButton = function(key)
-            return self:_focusNavigationButton(key)
-        end,
-        restoreAppFocus = function()
-            return self:_restoreAppFocus()
-        end
+        audio = AudioLib
     })
     self.loader = self.loaderController.state
     self.menuController = menuControllerFactory.new(self.shared, {
-        menuRootPath = MENU_ROOT_PATH,
-        onSyncState = function(state)
-            self:_syncMenuState(state)
-        end,
-        currentMenuAccessSignature = function()
-            return self:_currentMenuAccessSignatureLegacy()
-        end,
-        currentMenuEnableSignature = function()
-            return self:_currentMenuEnableSignatureLegacy()
-        end,
-        itemEnabled = function(item)
-            return self:_itemEnabled(item)
-        end,
-        reloadCurrentMenuNode = function()
-            return self:_reloadCurrentMenuNode()
-        end,
-        invalidateForm = function()
-            return self:_invalidateForm()
-        end,
-        modalUiActive = function()
-            return self:_modalUiActive()
-        end,
-        focusNavigationButton = function(key)
-            return self:_focusNavigationButton(key)
-        end
+        menuRootPath = MENU_ROOT_PATH
     })
     self:_syncMenuState(self.menuController.state)
-    self.navigationController = navigationControllerFactory.new(self.shared, {
-        getCurrentNode = function()
-            return self.currentNode
-        end,
-        getCurrentNodeSource = function()
-            return self.currentNodeSource
-        end,
-        getPathStack = function()
-            return self.pathStack
-        end,
-        headerMetrics = function()
-            return self:_headerMetrics()
-        end,
-        headerNavY = function()
-            return self:_headerNavY()
-        end,
-        headerTitlePos = function()
-            return self:_headerTitlePos()
-        end,
-        collapseNavigation = function()
-            return self:_collapseNavigation()
-        end,
-        loadMask = function(path)
-            return self:_loadMask(path)
-        end,
-        canSaveNode = function(node)
-            return self:_canSaveNode(node)
-        end,
-        handleMenuAction = function()
-            return self:_handleMenuAction()
-        end,
-        handleSaveAction = function()
-            return self:_handleSaveAction()
-        end,
-        handleReloadAction = function()
-            return self:_handleReloadAction()
-        end,
-        handleToolAction = function()
-            return self:_handleToolAction()
-        end,
-        handleHelpAction = function()
-            return self:_handleHelpAction()
-        end,
-        getNavFields = function()
-            return self.navFields
-        end,
-        setNavField = function(key, field)
-            self.navFields[key] = field
-            if self.formHost and self.formHost._sync then
-                self.formHost:_sync()
-            end
-        end,
-        getHeaderTitleField = function()
-            return self.headerTitleField
-        end,
-        setHeaderTitleField = function(field)
-            self.headerTitleField = field
-            if self.formHost and self.formHost.state then
-                self.formHost.state.headerTitleField = field
-                if self.formHost._sync then
-                    self.formHost:_sync()
-                end
-            end
-        end
-    })
-    self.actionsController = actionsControllerFactory.new(self.shared, {
-        getCurrentNode = function()
-            return self.currentNode
-        end,
-        getPathStack = function()
-            return self.pathStack
-        end,
-        runNodeHook = function(node, hookName, ...)
-            return self:_runNodeHook(node, hookName, ...)
-        end,
-        canSaveNode = function(node)
-            return self:_canSaveNode(node)
-        end,
-        confirmBeforeSave = function()
-            return self:_confirmBeforeSave()
-        end,
-        confirmBeforeReload = function()
-            return self:_confirmBeforeReload()
-        end,
-        setPageDirty = function(isDirty)
-            return self:setPageDirty(isDirty)
-        end,
-        requestExit = function()
-            return self:_requestExit()
-        end,
-        goBack = function()
-            return self:_goBack()
-        end
-    })
-    self.eventsController = eventsControllerFactory.new(self.shared, {
-        clearFocusRestore = function()
-            if self.menuController and self.menuController.clearFocusRestore then
-                self.menuController:clearFocusRestore()
-            else
-                self.pendingFocusRestore = false
-            end
-        end,
-        getModalDialogDepth = function()
-            return self.modalDialogDepth or 0
-        end,
-        isLoaderModalActive = function()
-            return self.loader and self.loader.active and self.loader.active.modal == true
-        end,
-        getReturnMenuArmed = function()
-            return self.returnMenuArmed == true
-        end,
-        setReturnMenuArmed = function(value)
-            self.returnMenuArmed = value == true
-        end,
-        requestExit = function()
-            return self:_requestExit()
-        end,
-        focusNavigationButton = function(key)
-            return self:_focusNavigationButton(key)
-        end,
-        handleMenuAction = function()
-            return self:_handleMenuAction()
-        end,
-        handleSaveAction = function()
-            return self:_handleSaveAction()
-        end,
-        navButtonsForNode = function(node)
-            return self:_navButtonsForNode(node)
-        end,
-        getCurrentNode = function()
-            return self.currentNode
-        end,
-        runNodeHook = function(node, hookName, ...)
-            return self:_runNodeHook(node, hookName, ...)
-        end
-    })
+    self.navigationController = navigationControllerFactory.new(self.shared, {})
+    self.actionsController = actionsControllerFactory.new(self.shared, {})
+    self.eventsController = eventsControllerFactory.new(self.shared, {})
     self.lifecycleController = lifecycleControllerFactory.new(self.shared, {
-        onSyncState = function(state)
-            self:_syncLifecycleState(state)
-        end,
-        armStartupSensors = function()
-            local sensorsTask = self.framework and self.framework.getTask and self.framework:getTask("sensors") or nil
-            if sensorsTask and type(sensorsTask.armSensorLostMute) == "function" then
-                sensorsTask:armSensorLostMute(STARTUP_SENSOR_LOST_MUTE)
-            end
-        end,
-        resetLoader = function()
-            if self.loaderController then
-                self.loaderController:reset()
-            end
-        end,
-        resetMenu = function()
-            if self.menuController then
-                self.menuController:reset()
-            end
-        end,
-        primeMenuSignatures = function(accessSig, enableSig)
-            if self.menuController and self.menuController.primeSignatures then
-                self.menuController:primeSignatures(accessSig, enableSig)
-            else
-                self.menuAccessSignature = accessSig
-                self.menuEnableSignature = enableSig
-            end
-        end,
-        currentMenuAccessSignature = function()
-            return self:_currentMenuAccessSignatureLegacy()
-        end,
-        currentMenuEnableSignature = function()
-            return self:_currentMenuEnableSignatureLegacy()
-        end,
-        clearAllCallbacks = function()
-            if self.callback then
-                self.callback:clearAll()
-            end
-        end,
-        closeCurrentNode = function()
-            return self:_closeNode(self.currentNode)
-        end,
-        clearForm = function()
-            safeFormClear()
-        end,
-        resetFormHost = function()
-            if self.formHost then
-                self.formHost:reset()
-            end
-        end,
-        resetPageHost = function()
-            if self.pageHost then
-                self.pageHost:reset()
-            end
-        end,
-        resetCurrentNodeFallback = function(nilPathStack)
-            self.currentNode = nil
-            self.pathStack = nilPathStack and nil or {}
-        end,
-        clearMaskCache = function()
-            -- Keep masks warm across app close/open cycles.
-            return
-        end,
-        nilMaskCache = function()
-            -- Keep masks warm across app close/open cycles.
-            return
-        end,
-        clearAppModuleCaches = function()
-            clearAppModuleCaches()
-        end,
-        savePreferences = function()
-            return self:_savePreferences()
-        end,
-        collectGarbage = function(mode)
-            if mode == "collect" then
-                pcall(collectgarbage, "collect")
-            else
-                pcall(collectgarbage, "step", 64)
-            end
-        end,
-        loadRoot = function()
-            if self.pageHost then
-                self.pageHost:openRoot()
-            else
-                self:_closeNode(self.currentNode)
-                self:setPageDirty(false)
-                self.pathStack = {}
-                self.currentNodeSource = MENU_ROOT_PATH
-                self.currentNode = self:_loadRootNode()
-                self:_afterNodeChanged()
-                self:_invalidateForm()
-            end
-        end,
-        resetSnapshot = function()
-            self.snapshot = nil
-        end,
-        resetTelemetryTask = function()
-            self.telemetryTask = nil
-        end,
-        resetFramework = function()
-            self.framework = nil
-        end
     })
     self:_syncLifecycleState(self.lifecycleController.state)
     self.formHost = formHostControllerFactory.new(self.shared, {
-        onSyncState = function(state)
-            self:_syncFormHostState(state)
-        end,
-        clearForm = function()
-            safeFormClear()
-        end,
-        nodeHasMenuItems = function(node)
-            return self:_nodeHasMenuItems(node)
-        end,
-        collectNodeIconPaths = function(node)
-            return self:_collectNodeIconPaths(node)
-        end,
-        loadMask = function(path)
-            return self:_loadMask(path)
-        end,
-        loadRootNode = function()
-            return self:_loadRootNode()
-        end,
-        addHeader = function(node)
-            return self:_addHeader(node)
-        end,
-        runNodeHook = function(node, hookName, ...)
-            return self:_runNodeHook(node, hookName, ...)
-        end,
-        addStaticLine = function(label, value, key)
-            return self:_addStaticLine(label, value, key)
-        end,
-        buildGridButtons = function(items)
-            return self:_buildGridButtons(items)
-        end,
-        currentMenuEnableSignature = function()
-            return self:_currentMenuEnableSignature()
-        end,
-        setMenuEnableSignature = function(signature)
-            if self.menuController and self.menuController.setMenuEnableSignature then
-                self.menuController:setMenuEnableSignature(signature)
-            else
-                self.menuEnableSignature = signature
-            end
-        end,
-        clearMenuFocusRestore = function()
-            if self.menuController and self.menuController.clearFocusRestore then
-                self.menuController:clearFocusRestore()
-            else
-                self.pendingFocusRestore = false
-            end
-        end,
-        syncSaveButtonState = function()
-            return self:_syncSaveButtonState()
-        end,
-        restoreAppFocus = function()
-            if self.pendingFocusRestore == true then
-                return self:_restoreAppFocus()
-            end
-            return false
-        end,
-        resolveItemValue = function(item)
-            return self:_resolveItemValue(item)
-        end
     })
     self:_syncFormHostState(self.formHost.state)
     self.pageHost = pageHostControllerFactory.new(self.shared, {
-        menuRootPath = MENU_ROOT_PATH,
-        onSyncState = function(state)
-            self:_syncPageHostState(state)
-        end,
-        loadRootNode = function()
-            return self:_loadRootNode()
-        end,
-        loadNodeFromSource = function(source)
-            return self:_loadNodeFromSource(source)
-        end,
-        loadPageNode = function(item, breadcrumb)
-            return self:_loadPageNode(item, breadcrumb)
-        end,
-        makeLeafNode = function(item, breadcrumb)
-            return self:_makeLeafNode(item, breadcrumb)
-        end,
-        closeNode = function(node)
-            return self:_closeNode(node)
-        end,
-        afterNodeChanged = function()
-            return self:_afterNodeChanged()
-        end,
-        invalidateForm = function()
-            return self:_invalidateForm()
-        end,
-        setPageDirty = function(value)
-            return self:setPageDirty(value)
-        end,
-        requestAppFocusRestore = function()
-            return self:_requestAppFocusRestore()
-        end,
-        setSelectedIndex = function(source, index)
-            return self:_setSelectedIndex(source, index)
-        end,
-        showLoader = function(options)
-            return self:showLoader(options)
-        end,
-        updateLoader = function(options)
-            return self:updateLoader(options)
-        end,
-        clearLoader = function(force)
-            return self:clearLoader(force)
-        end
+        menuRootPath = MENU_ROOT_PATH
     })
     self:_syncPageHostState(self.pageHost.state)
     self.ui = self:_createUiBridge()
@@ -966,7 +592,7 @@ function App:_pruneMaskCacheForNode(node)
 end
 
 function App:_afterNodeChanged()
-    return self.lifecycleController:afterNodeChanged()
+    return self:_pruneMaskCacheForNode(self.currentNode)
 end
 
 function App:_reportNodeError(context, err)
@@ -1810,7 +1436,7 @@ function App:_currentMenuAccessSignatureLegacy()
 end
 
 function App:_currentMenuAccessSignature()
-    return self.menuController.currentMenuAccessSignature()
+    return self.menuController and self.menuController.state and self.menuController.state.menuAccessSignature or "default"
 end
 
 function App:_currentMenuEnableSignatureLegacy()
@@ -1824,7 +1450,7 @@ function App:_currentMenuEnableSignatureLegacy()
 end
 
 function App:_currentMenuEnableSignature()
-    return self.menuController.currentMenuEnableSignature()
+    return self.menuController and self.menuController.state and self.menuController.state.menuEnableSignature or "default"
 end
 
 function App:_reloadCurrentMenuNode()

@@ -23,29 +23,13 @@ local function normalizeNavButton(value)
 end
 
 function controller.new(shared, options)
-    local opts = options or {}
-
     return setmetatable({
-        shared = shared,
-        getCurrentNode = opts.getCurrentNode,
-        getCurrentNodeSource = opts.getCurrentNodeSource,
-        getPathStack = opts.getPathStack,
-        headerMetrics = opts.headerMetrics,
-        headerNavY = opts.headerNavY,
-        headerTitlePos = opts.headerTitlePos,
-        collapseNavigation = opts.collapseNavigation,
-        loadMask = opts.loadMask,
-        canSaveNode = opts.canSaveNode,
-        handleMenuAction = opts.handleMenuAction,
-        handleSaveAction = opts.handleSaveAction,
-        handleReloadAction = opts.handleReloadAction,
-        handleToolAction = opts.handleToolAction,
-        handleHelpAction = opts.handleHelpAction,
-        getNavFields = opts.getNavFields,
-        setNavField = opts.setNavField,
-        getHeaderTitleField = opts.getHeaderTitleField,
-        setHeaderTitleField = opts.setHeaderTitleField
+        shared = shared
     }, controller_mt)
+end
+
+function controller:_app()
+    return self.shared and self.shared.app or nil
 end
 
 function controller:buttonsForNode(node)
@@ -71,10 +55,11 @@ function controller:buttonsForNode(node)
 end
 
 function controller:addNavigationButtons()
-    local node = type(self.getCurrentNode) == "function" and self.getCurrentNode() or nil
+    local app = self:_app()
+    local node = app and app.currentNode or nil
     local navConfig = self:buttonsForNode(node)
-    local metrics = type(self.headerMetrics) == "function" and self.headerMetrics() or {}
-    local y = type(self.headerNavY) == "function" and self.headerNavY() or 0
+    local metrics = app and app._headerMetrics and app:_headerMetrics() or {}
+    local y = app and app._headerNavY and app:_headerNavY() or 0
     local xRight = (metrics.width or 0) - 12
     local renderDefs = {}
     local defs = {
@@ -85,8 +70,8 @@ function controller:addNavigationButtons()
             visible = navConfig.menu.enabled == true,
             icon = navConfig.menu.icon,
             press = function()
-                if type(self.handleMenuAction) == "function" then
-                    self.handleMenuAction()
+                if app and app._handleMenuAction then
+                    app:_handleMenuAction()
                 end
             end
         },
@@ -97,8 +82,8 @@ function controller:addNavigationButtons()
             visible = navConfig.save.enabled == true,
             icon = navConfig.save.icon,
             press = function()
-                if type(self.handleSaveAction) == "function" then
-                    self.handleSaveAction()
+                if app and app._handleSaveAction then
+                    app:_handleSaveAction()
                 end
             end
         },
@@ -109,8 +94,8 @@ function controller:addNavigationButtons()
             visible = navConfig.reload.enabled == true,
             icon = navConfig.reload.icon,
             press = function()
-                if type(self.handleReloadAction) == "function" then
-                    self.handleReloadAction()
+                if app and app._handleReloadAction then
+                    app:_handleReloadAction()
                 end
             end
         },
@@ -121,8 +106,8 @@ function controller:addNavigationButtons()
             visible = navConfig.tool.enabled == true,
             icon = navConfig.tool.icon,
             press = function()
-                if type(self.handleToolAction) == "function" then
-                    self.handleToolAction()
+                if app and app._handleToolAction then
+                    app:_handleToolAction()
                 end
             end
         },
@@ -133,14 +118,14 @@ function controller:addNavigationButtons()
             visible = navConfig.help.enabled == true,
             icon = navConfig.help.icon,
             press = function()
-                if type(self.handleHelpAction) == "function" then
-                    self.handleHelpAction()
+                if app and app._handleHelpAction then
+                    app:_handleHelpAction()
                 end
             end
         }
     }
 
-    if type(self.collapseNavigation) == "function" and self.collapseNavigation() == true then
+    if app and app._collapseNavigation and app:_collapseNavigation() == true then
         for i = 1, #defs do
             if defs[i].visible == true then
                 renderDefs[#renderDefs + 1] = defs[i]
@@ -156,7 +141,7 @@ function controller:addNavigationButtons()
         local bx = xRight - width
         local field = form.addButton(nil, {x = bx, y = y, w = width, h = metrics.buttonH or 0}, {
             text = def.text,
-            icon = type(def.icon) == "string" and type(self.loadMask) == "function" and self.loadMask(def.icon) or nil,
+            icon = type(def.icon) == "string" and app and app._loadMask and app:_loadMask(def.icon) or nil,
             options = FONT_S,
             paint = function() end,
             press = def.press
@@ -164,40 +149,51 @@ function controller:addNavigationButtons()
 
         if field and field.enable then
             if def.key == "save" then
-                field:enable(type(self.canSaveNode) == "function" and self.canSaveNode(node) or false)
+                field:enable(app and app._canSaveNode and app:_canSaveNode(node) or false)
             else
                 field:enable(def.visible == true)
             end
         end
-        if type(self.setNavField) == "function" then
-            self.setNavField(def.key, field)
+        if app then
+            app.navFields[def.key] = field
+            if app.formHost and app.formHost._sync then
+                app.formHost:_sync()
+            end
         end
         xRight = bx - 5
     end
 end
 
 function controller:addHeader(node, menuRootPath)
+    local app = self:_app()
     local line = form.addLine("")
-    local currentSource = type(self.getCurrentNodeSource) == "function" and self.getCurrentNodeSource() or nil
+    local currentSource = app and app.currentNodeSource or nil
     local headerTitle = (node and node.title) or "Rotorflight"
 
     if currentSource == menuRootPath then
         headerTitle = node.headerTitle or headerTitle
     end
     if type(headerTitle) == "string" and headerTitle ~= "" then
-        local field = form.addStaticText(line, type(self.headerTitlePos) == "function" and self.headerTitlePos() or {}, headerTitle)
-        if type(self.setHeaderTitleField) == "function" then
-            self.setHeaderTitleField(field)
+        local field = form.addStaticText(line, app and app._headerTitlePos and app:_headerTitlePos() or {}, headerTitle)
+        if app then
+            app.headerTitleField = field
+            if app.formHost and app.formHost.state then
+                app.formHost.state.headerTitleField = field
+                if app.formHost._sync then
+                    app.formHost:_sync()
+                end
+            end
         end
     end
     self:addNavigationButtons()
 end
 
 function controller:setHeaderTitle(title, menuRootPath)
+    local app = self:_app()
     local headerTitle = tostring(title or "")
-    local node = type(self.getCurrentNode) == "function" and self.getCurrentNode() or nil
-    local currentSource = type(self.getCurrentNodeSource) == "function" and self.getCurrentNodeSource() or nil
-    local field = type(self.getHeaderTitleField) == "function" and self.getHeaderTitleField() or nil
+    local node = app and app.currentNode or nil
+    local currentSource = app and app.currentNodeSource or nil
+    local field = app and app.headerTitleField or nil
 
     if type(node) == "table" then
         if currentSource == menuRootPath then
@@ -215,17 +211,19 @@ function controller:setHeaderTitle(title, menuRootPath)
 end
 
 function controller:syncSaveButtonState()
-    local navFields = type(self.getNavFields) == "function" and self.getNavFields() or nil
-    local node = type(self.getCurrentNode) == "function" and self.getCurrentNode() or nil
+    local app = self:_app()
+    local navFields = app and app.navFields or nil
+    local node = app and app.currentNode or nil
     local save = navFields and navFields.save or nil
 
     if save and save.enable then
-        save:enable(type(self.canSaveNode) == "function" and self.canSaveNode(node) or false)
+        save:enable(app and app._canSaveNode and app:_canSaveNode(node) or false)
     end
 end
 
 function controller:focusNavigationButton(key)
-    local navFields = type(self.getNavFields) == "function" and self.getNavFields() or nil
+    local app = self:_app()
+    local navFields = app and app.navFields or nil
     local field = navFields and navFields[key] or nil
 
     if field and field.focus then

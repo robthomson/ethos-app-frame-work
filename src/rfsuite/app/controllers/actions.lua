@@ -7,19 +7,8 @@ local controller = {}
 local controller_mt = {__index = controller}
 
 function controller.new(shared, options)
-    local opts = options or {}
-
     return setmetatable({
-        shared = shared,
-        getCurrentNode = opts.getCurrentNode,
-        getPathStack = opts.getPathStack,
-        runNodeHook = opts.runNodeHook,
-        canSaveNode = opts.canSaveNode,
-        confirmBeforeSave = opts.confirmBeforeSave,
-        confirmBeforeReload = opts.confirmBeforeReload,
-        setPageDirty = opts.setPageDirty,
-        requestExit = opts.requestExit,
-        goBack = opts.goBack
+        shared = shared
     }, controller_mt)
 end
 
@@ -66,36 +55,37 @@ function controller:_confirmAction(title, message, action)
 end
 
 function controller:handleSaveAction()
-    local node = type(self.getCurrentNode) == "function" and self.getCurrentNode() or nil
+    local app = self:_app()
+    local node = app and app.currentNode or nil
     local result
     local customResult
     local handled
 
-    if type(self.canSaveNode) == "function" and not self.canSaveNode(node) then
+    if app and app._canSaveNode and not app:_canSaveNode(node) then
         return false
     end
 
-    if type(self.runNodeHook) == "function" then
-        customResult, handled = self.runNodeHook(node, "onSaveMenu")
+    if app and app._runNodeHook then
+        customResult, handled = app:_runNodeHook(node, "onSaveMenu")
         if handled == true then
             return customResult ~= false
         end
     end
 
     local function runSave()
-        if type(self.runNodeHook) == "function" then
-            result = self.runNodeHook(node, "save")
+        if app and app._runNodeHook then
+            result = app:_runNodeHook(node, "save")
         end
         if result == false then
             return false
         end
-        if type(self.setPageDirty) == "function" then
-            self.setPageDirty(false)
+        if app and app.setPageDirty then
+            app:setPageDirty(false)
         end
         return true
     end
 
-    if type(self.confirmBeforeSave) == "function" and self.confirmBeforeSave() == true then
+    if app and app._confirmBeforeSave and app:_confirmBeforeSave() == true then
         return self:_confirmAction("Save Settings", "Save changes?", runSave)
     end
 
@@ -103,32 +93,33 @@ function controller:handleSaveAction()
 end
 
 function controller:handleReloadAction()
-    local node = type(self.getCurrentNode) == "function" and self.getCurrentNode() or nil
+    local app = self:_app()
+    local node = app and app.currentNode or nil
     local result
     local customResult
     local handled
 
-    if type(self.runNodeHook) == "function" then
-        customResult, handled = self.runNodeHook(node, "onReloadMenu")
+    if app and app._runNodeHook then
+        customResult, handled = app:_runNodeHook(node, "onReloadMenu")
         if handled == true then
             return customResult ~= false
         end
     end
 
     local function runReload()
-        if type(self.runNodeHook) == "function" then
-            result = self.runNodeHook(node, "reload")
+        if app and app._runNodeHook then
+            result = app:_runNodeHook(node, "reload")
         end
         if result == false then
             return false
         end
-        if type(self.setPageDirty) == "function" then
-            self.setPageDirty(false)
+        if app and app.setPageDirty then
+            app:setPageDirty(false)
         end
         return true
     end
 
-    if type(self.confirmBeforeReload) == "function" and self.confirmBeforeReload() == true then
+    if app and app._confirmBeforeReload and app:_confirmBeforeReload() == true then
         return self:_confirmAction("Reload Settings", "Discard changes and reload?", runReload)
     end
 
@@ -136,42 +127,44 @@ function controller:handleReloadAction()
 end
 
 function controller:handleMenuAction()
-    local node = type(self.getCurrentNode) == "function" and self.getCurrentNode() or nil
-    local pathStack = type(self.getPathStack) == "function" and self.getPathStack() or {}
+    local app = self:_app()
+    local node = app and app.currentNode or nil
+    local pathStack = app and app.pathStack or {}
     local result
     local handled
 
-    if type(self.runNodeHook) == "function" then
-        result, handled = self.runNodeHook(node, "onNavMenu")
+    if app and app._runNodeHook then
+        result, handled = app:_runNodeHook(node, "onNavMenu")
         if handled == true then
             return result ~= false
         end
 
-        result, handled = self.runNodeHook(node, "menu")
+        result, handled = app:_runNodeHook(node, "menu")
         if handled == true then
             return result ~= false
         end
     end
 
     if #pathStack == 0 then
-        return type(self.requestExit) == "function" and self.requestExit() or false
+        return app and app._requestExit and app:_requestExit() or false
     end
 
-    return type(self.goBack) == "function" and self.goBack() or false
+    return app and app._goBack and app:_goBack() or false
 end
 
 function controller:handleToolAction()
-    local node = type(self.getCurrentNode) == "function" and self.getCurrentNode() or nil
+    local app = self:_app()
+    local node = app and app.currentNode or nil
     local result
     local handled
 
-    if type(self.runNodeHook) == "function" then
-        result, handled = self.runNodeHook(node, "onToolMenu")
+    if app and app._runNodeHook then
+        result, handled = app:_runNodeHook(node, "onToolMenu")
         if handled == true then
             return result ~= false
         end
 
-        result, handled = self.runNodeHook(node, "tool")
+        result, handled = app:_runNodeHook(node, "tool")
         if handled == true then
             return result ~= false
         end
@@ -181,17 +174,18 @@ function controller:handleToolAction()
 end
 
 function controller:handleHelpAction()
-    local node = type(self.getCurrentNode) == "function" and self.getCurrentNode() or nil
+    local app = self:_app()
+    local node = app and app.currentNode or nil
     local result
     local handled
 
-    if type(self.runNodeHook) == "function" then
-        result, handled = self.runNodeHook(node, "onHelpMenu")
+    if app and app._runNodeHook then
+        result, handled = app:_runNodeHook(node, "onHelpMenu")
         if handled == true then
             return result ~= false
         end
 
-        result, handled = self.runNodeHook(node, "help")
+        result, handled = app:_runNodeHook(node, "help")
         if handled == true then
             return result ~= false
         end

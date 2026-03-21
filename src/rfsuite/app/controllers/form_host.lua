@@ -11,22 +11,6 @@ function controller.new(shared, options)
 
     return setmetatable({
         shared = shared,
-        onSyncState = opts.onSyncState,
-        clearForm = opts.clearForm,
-        nodeHasMenuItems = opts.nodeHasMenuItems,
-        collectNodeIconPaths = opts.collectNodeIconPaths,
-        loadMask = opts.loadMask,
-        loadRootNode = opts.loadRootNode,
-        addHeader = opts.addHeader,
-        runNodeHook = opts.runNodeHook,
-        addStaticLine = opts.addStaticLine,
-        buildGridButtons = opts.buildGridButtons,
-        currentMenuEnableSignature = opts.currentMenuEnableSignature,
-        setMenuEnableSignature = opts.setMenuEnableSignature,
-        clearMenuFocusRestore = opts.clearMenuFocusRestore,
-        syncSaveButtonState = opts.syncSaveButtonState,
-        restoreAppFocus = opts.restoreAppFocus,
-        resolveItemValue = opts.resolveItemValue,
         state = {
             formDirty = true,
             formBuildCount = 0,
@@ -39,9 +23,15 @@ function controller.new(shared, options)
     }, controller_mt)
 end
 
+function controller:_app()
+    return self.shared and self.shared.app or nil
+end
+
 function controller:_sync()
-    if type(self.onSyncState) == "function" then
-        self.onSyncState(self.state)
+    local app = self:_app()
+
+    if app and app._syncFormHostState then
+        app:_syncFormHostState(self.state)
     end
 end
 
@@ -74,62 +64,63 @@ function controller:invalidate()
 end
 
 function controller:build(node)
+    local app = self:_app()
     local built
     local hasCustomBuilder
     local iconPaths
     local index
 
-    if type(self.nodeHasMenuItems) == "function" and self.nodeHasMenuItems(node) == true then
-        iconPaths = type(self.collectNodeIconPaths) == "function" and self.collectNodeIconPaths(node) or {}
+    if app and app._nodeHasMenuItems and app:_nodeHasMenuItems(node) == true then
+        iconPaths = app._collectNodeIconPaths and app:_collectNodeIconPaths(node) or {}
         for index = 1, #iconPaths do
-            if type(self.loadMask) == "function" then
-                self.loadMask(iconPaths[index])
+            if app._loadMask then
+                app:_loadMask(iconPaths[index])
             end
         end
     end
 
-    if type(self.clearForm) == "function" then
-        self.clearForm()
+    if form and form.clear then
+        form.clear()
     end
     self:clearFormRefs()
     self.state.formBuildCount = (self.state.formBuildCount or 0) + 1
     self:_sync()
 
-    if type(self.addHeader) == "function" then
-        self.addHeader(node)
+    if app and app._addHeader then
+        app:_addHeader(node)
     end
-    if type(self.runNodeHook) == "function" then
-        built, hasCustomBuilder = self.runNodeHook(node, "buildForm")
+    if app and app._runNodeHook then
+        built, hasCustomBuilder = app:_runNodeHook(node, "buildForm")
     end
     if hasCustomBuilder then
-        if built == false and type(self.addStaticLine) == "function" then
-            self.addStaticLine("Error", "Page builder failed")
+        if built == false and app and app._addStaticLine then
+            app:_addStaticLine("Error", "Page builder failed")
         end
-        if type(self.syncSaveButtonState) == "function" then
-            self.syncSaveButtonState()
+        if app and app._syncSaveButtonState then
+            app:_syncSaveButtonState()
         end
-        if type(self.restoreAppFocus) == "function" then
-            self.restoreAppFocus()
+        if app and app.pendingFocusRestore == true and app._restoreAppFocus then
+            app:_restoreAppFocus()
         end
         return
     end
 
-    if type(self.buildGridButtons) == "function" then
-        self.buildGridButtons(node and node.items or {})
+    if app and app._buildGridButtons then
+        app:_buildGridButtons(node and node.items or {})
     end
-    if type(self.nodeHasMenuItems) == "function" and self.nodeHasMenuItems(node) == true then
-        if type(self.setMenuEnableSignature) == "function" and type(self.currentMenuEnableSignature) == "function" then
-            self.setMenuEnableSignature(self.currentMenuEnableSignature())
+    if app and app._nodeHasMenuItems and app:_nodeHasMenuItems(node) == true then
+        if app.menuController and app._currentMenuEnableSignature then
+            app.menuController:setMenuEnableSignature(app:_currentMenuEnableSignature())
         end
-        if type(self.clearMenuFocusRestore) == "function" then
-            self.clearMenuFocusRestore()
+        if app.menuController and app.menuController.clearFocusRestore then
+            app.menuController:clearFocusRestore()
         end
     end
-    if type(self.syncSaveButtonState) == "function" then
-        self.syncSaveButtonState()
+    if app and app._syncSaveButtonState then
+        app:_syncSaveButtonState()
     end
-    if type(self.restoreAppFocus) == "function" then
-        self.restoreAppFocus()
+    if app and app.pendingFocusRestore == true and app._restoreAppFocus then
+        app:_restoreAppFocus()
     end
 end
 
@@ -143,11 +134,12 @@ function controller:rebuildIfNeeded(node)
 end
 
 function controller:updateValueFields()
+    local app = self:_app()
     local entry
 
     for _, entry in ipairs(self.state.valueFields or {}) do
-        if entry.field and entry.field.value and type(self.resolveItemValue) == "function" then
-            entry.field:value(self.resolveItemValue(entry.item))
+        if entry.field and entry.field.value and app and app._resolveItemValue then
+            entry.field:value(app:_resolveItemValue(entry.item))
         end
     end
 end
