@@ -123,6 +123,15 @@ function controller:deactivate()
     if app and app._clearMaskCache then
         app:_clearMaskCache()
     end
+    if app and app._clearLuaTableCache then
+        app:_clearLuaTableCache()
+    end
+    if app then
+        app.snapshot = nil
+        app.telemetryTask = nil
+        app.mspTask = nil
+        app.rootLoadError = nil
+    end
     if app and app._savePreferences then
         app:_savePreferences()
     end
@@ -163,9 +172,14 @@ function controller:close()
     if app and app._clearMaskCache then
         app:_clearMaskCache()
     end
+    if app and app._clearLuaTableCache then
+        app:_clearLuaTableCache()
+    end
     if app then
         app.snapshot = nil
         app.telemetryTask = nil
+        app.mspTask = nil
+        app.rootLoadError = nil
     end
     if app and app._savePreferences then
         app:_savePreferences()

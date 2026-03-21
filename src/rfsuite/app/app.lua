@@ -153,10 +153,8 @@ local function unloadModuleIfLoaded(name)
 end
 
 local function clearAppModuleCaches()
-    -- Keep helper modules warm across app open/close cycles.
-    -- Repeated unload/reload churn costs more RAM over time on radio than
-    -- the small stable footprint of these shared helpers.
-    return
+    SHORTCUTS_MODULE_CACHE = nil
+    MENU_VISIBILITY_MODULE_CACHE = nil
 end
 
 local function cloneTable(value, seen)
@@ -603,6 +601,23 @@ function App:_clearMaskCache()
             self.maskCache[path] = nil
         end
     end
+end
+
+function App:_clearLuaTableCache()
+    local path
+
+    for path in pairs(LUA_TABLE_CACHE) do
+        if path == MENU_ROOT_PATH
+            or path == "app/lib/shortcuts.lua"
+            or path == "app/lib/menu_visibility.lua"
+            or path:sub(1, 9) == "app/menu/"
+            or path:sub(1, 12) == "app/modules/"
+        then
+            LUA_TABLE_CACHE[path] = nil
+        end
+    end
+
+    clearAppModuleCaches()
 end
 
 function App:_pruneMaskCacheForNode(node)
