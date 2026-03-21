@@ -2025,39 +2025,32 @@ end
 
 function App:_makeLoadErrorNode(item, breadcrumb, err)
     local title = (type(item) == "table" and item.title) or "Load Error"
+    local details = {
+        {id = "status", title = "Status", kind = "static", value = "Load Error"},
+        {id = "path", title = "Path", kind = "static", value = (type(item) == "table" and item.path) or "n/a"},
+        {id = "error", title = "Error", kind = "static", value = tostring(err)}
+    }
     return {
         title = title,
         subtitle = tostring(err),
         breadcrumb = breadcrumb,
         navButtons = {menu = true, save = false, reload = false, tool = false, help = false},
-        state = {errorDialogShown = false},
-        wakeup = function(node)
-            if node.state.errorDialogShown == true then
-                return
-            end
-            if not (form and form.openDialog) then
-                return
-            end
+        buildForm = function(node, app)
+            local width = app:_windowSize()
+            local radio = app.radio or {}
+            local pos = {
+                x = math.floor(width * 0.13),
+                y = radio.linePaddingTop or 0,
+                w = math.floor(width * 0.85),
+                h = radio.navbuttonHeight or 30
+            }
 
-            node.state.errorDialogShown = true
-            self:_openManagedDialog({
-                width = nil,
-                title = "Load Error",
-                message = tostring(err),
-                buttons = {{
-                    label = "Close",
-                    action = function()
-                        return true
-                    end
-                }},
-                options = TEXT_LEFT
-            })
+            for _, entry in ipairs(details) do
+                local line = form.addLine(entry.title)
+                form.addStaticText(line, pos, tostring(entry.value or ""))
+            end
         end,
-        items = {
-            {id = "status", title = "Status", kind = "static", value = "Load Error"},
-            {id = "path", title = "Path", kind = "static", value = (type(item) == "table" and item.path) or "n/a"},
-            {id = "error", title = "Error", kind = "static", value = tostring(err)}
-        }
+        items = details
     }
 end
 
