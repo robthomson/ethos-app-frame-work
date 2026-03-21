@@ -53,6 +53,9 @@ framework._taskMetadata = {}
 -- App management
 framework._app = nil
 framework._appModule = nil
+framework._appLoader = nil
+framework._appUnloader = nil
+framework._appUnloadOnDeactivate = false
 framework._appActive = false
 
 -- State
@@ -231,6 +234,9 @@ end
 function framework:registerApp(appModule, options)
     options = options or {}
     self._appModule = appModule
+    self._appLoader = options.loader
+    self._appUnloader = options.unload
+    self._appUnloadOnDeactivate = options.unloadOnDeactivate == true
     self._app = nil
     self.session:set("appRegistered", true)
 end
@@ -245,6 +251,18 @@ function framework:_createAppInstance()
     end
 
     local appModule = self._appModule
+    if type(appModule) ~= "table" then
+        if type(self._appLoader) == "function" then
+            local ok, loaded = pcall(self._appLoader, self)
+            if ok then
+                appModule = loaded
+            else
+                self.log:error("Failed to load app module: %s", tostring(loaded))
+                return nil
+            end
+        end
+    end
+
     if type(appModule) ~= "table" then
         return nil
     end
@@ -285,13 +303,19 @@ function framework:deactivateApp()
     
     self:_emit("app:deactivated")
 
-    if self._app and self._app.close then
-        pcall(self._app.close, self._app)
+    if self._appUnloadOnDeactivate == true then
+        if self._app and self._app.close then
+            pcall(self._app.close, self._app)
+        end
+        self._app = nil
+        if type(self._appUnloader) == "function" then
+            pcall(self._appUnloader, self)
+        end
+        self.session:set("appResident", false)
+        collectgarbage("collect")
+    else
+        self.session:set("appResident", self._app ~= nil)
     end
-
-    self._app = nil
-    self.session:set("appResident", false)
-    collectgarbage("collect")
 end
 
 --[[ TASK REGISTRATION & SCHEDULING ]]
@@ -617,6 +641,9 @@ function framework:close()
     end
     self._app = nil
     self._appModule = nil
+    self._appLoader = nil
+    self._appUnloader = nil
+    self._appUnloadOnDeactivate = false
     
     -- Clear callbacks and events
     self.callback:clearAll()

@@ -8,7 +8,6 @@
 ]] --
 
 local framework = require("framework.core.init")
-local App = require("app.app")
 local LoggerTask = require("tasks.logger")
 local MSPTask = require("tasks.msp")
 local LifecycleTask = require("tasks.lifecycle")
@@ -119,6 +118,55 @@ runtime.config = {
 
 runtime.icon = lcd and lcd.loadMask and lcd.loadMask("app/gfx/icon.png") or nil
 runtime.framework = framework
+
+local function loadLuaTable(path)
+    local chunk, loadErr
+    local ok, value
+
+    if type(path) ~= "string" or path == "" then
+        error("invalid module path")
+    end
+
+    chunk, loadErr = loadfile(path)
+    if not chunk then
+        error(tostring(loadErr or ("unable_to_load_" .. path)))
+    end
+
+    ok, value = pcall(chunk)
+    if not ok then
+        error(tostring(value))
+    end
+    if type(value) ~= "table" then
+        error("module did not return table: " .. tostring(path))
+    end
+
+    return value
+end
+
+local function loadAppModule()
+    local ok, module = pcall(require, "app.app")
+    if ok and type(module) == "table" then
+        return module
+    end
+
+    return loadLuaTable("app/app.lua")
+end
+
+local function unloadAppModules()
+    local loaded
+    local name
+
+    if not (package and type(package.loaded) == "table") then
+        return
+    end
+
+    loaded = package.loaded
+    for name in pairs(loaded) do
+        if type(name) == "string" and name:match("^app[%.]") then
+            loaded[name] = nil
+        end
+    end
+end
 
 local function seedSession(fw)
     fw.session:setMultiple({
@@ -271,7 +319,11 @@ function runtime.ensureFramework()
         enabled = true
     })
 
-    framework:registerApp(App)
+    framework:registerApp(nil, {
+        loader = loadAppModule,
+        unload = unloadAppModules,
+        unloadOnDeactivate = false
+    })
     seedSession(framework)
 
     framework.log:connect("Framework initialized")

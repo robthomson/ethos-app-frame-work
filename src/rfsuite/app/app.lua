@@ -4,9 +4,107 @@
 ]] --
 
 local App = {}
-local ethos_events = require("framework.utils.ethos_events")
 local callbackFactory = require("framework.core.callback")
 local AudioLib = require("lib.audio")
+local sharedContextFactory
+local loaderControllerFactory
+local pageHostControllerFactory
+local menuControllerFactory
+local formHostControllerFactory
+local navigationControllerFactory
+local actionsControllerFactory
+local eventsControllerFactory
+local lifecycleControllerFactory
+
+do
+    local ok, mod = pcall(require, "app.shared.context")
+    if ok and type(mod) == "table" then
+        sharedContextFactory = mod
+    else
+        local chunk = assert(loadfile("app/shared/context.lua"))
+        sharedContextFactory = chunk()
+    end
+end
+
+do
+    local ok, mod = pcall(require, "app.controllers.loader")
+    if ok and type(mod) == "table" then
+        loaderControllerFactory = mod
+    else
+        local chunk = assert(loadfile("app/controllers/loader.lua"))
+        loaderControllerFactory = chunk()
+    end
+end
+
+do
+    local ok, mod = pcall(require, "app.controllers.page_host")
+    if ok and type(mod) == "table" then
+        pageHostControllerFactory = mod
+    else
+        local chunk = assert(loadfile("app/controllers/page_host.lua"))
+        pageHostControllerFactory = chunk()
+    end
+end
+
+do
+    local ok, mod = pcall(require, "app.controllers.menu")
+    if ok and type(mod) == "table" then
+        menuControllerFactory = mod
+    else
+        local chunk = assert(loadfile("app/controllers/menu.lua"))
+        menuControllerFactory = chunk()
+    end
+end
+
+do
+    local ok, mod = pcall(require, "app.controllers.form_host")
+    if ok and type(mod) == "table" then
+        formHostControllerFactory = mod
+    else
+        local chunk = assert(loadfile("app/controllers/form_host.lua"))
+        formHostControllerFactory = chunk()
+    end
+end
+
+do
+    local ok, mod = pcall(require, "app.controllers.navigation")
+    if ok and type(mod) == "table" then
+        navigationControllerFactory = mod
+    else
+        local chunk = assert(loadfile("app/controllers/navigation.lua"))
+        navigationControllerFactory = chunk()
+    end
+end
+
+do
+    local ok, mod = pcall(require, "app.controllers.actions")
+    if ok and type(mod) == "table" then
+        actionsControllerFactory = mod
+    else
+        local chunk = assert(loadfile("app/controllers/actions.lua"))
+        actionsControllerFactory = chunk()
+    end
+end
+
+do
+    local ok, mod = pcall(require, "app.controllers.events")
+    if ok and type(mod) == "table" then
+        eventsControllerFactory = mod
+    else
+        local chunk = assert(loadfile("app/controllers/events.lua"))
+        eventsControllerFactory = chunk()
+    end
+end
+
+do
+    local ok, mod = pcall(require, "app.controllers.lifecycle")
+    if ok and type(mod) == "table" then
+        lifecycleControllerFactory = mod
+    else
+        local chunk = assert(loadfile("app/controllers/lifecycle.lua"))
+        lifecycleControllerFactory = chunk()
+    end
+end
 
 local MENU_ROOT_PATH = "app/menu/root.lua"
 local MASK_CACHE_MAX = 32
@@ -41,6 +139,9 @@ local APP_RENDER_CALLBACK_WAKEUP_OPTIONS = {
 local APP_MAINTENANCE_PHASES = 3
 local SHORTCUTS_MODULE_CACHE = nil
 local MENU_VISIBILITY_MODULE_CACHE = nil
+local SHARED_MASK_CACHE = {}
+local SHARED_MASK_CACHE_ORDER = {}
+local LUA_TABLE_CACHE = {}
 
 local function unloadModuleIfLoaded(name)
     if type(name) ~= "string" or name == "" then
@@ -52,18 +153,48 @@ local function unloadModuleIfLoaded(name)
 end
 
 local function clearAppModuleCaches()
-    SHORTCUTS_MODULE_CACHE = nil
-    MENU_VISIBILITY_MODULE_CACHE = nil
+    -- Keep helper modules warm across app open/close cycles.
+    -- Repeated unload/reload churn costs more RAM over time on radio than
+    -- the small stable footprint of these shared helpers.
+    return
+end
 
-    unloadModuleIfLoaded("app.lib.shortcuts")
-    unloadModuleIfLoaded("app.lib.menu_visibility")
-    unloadModuleIfLoaded("app.lib.msp_page")
-    unloadModuleIfLoaded("app.lib.prefs_page")
+local function cloneTable(value, seen)
+    local copy
+    local key
+    local nestedSeen = seen or {}
+
+    if type(value) ~= "table" then
+        return value
+    end
+    if nestedSeen[value] then
+        return nestedSeen[value]
+    end
+
+    copy = {}
+    nestedSeen[value] = copy
+
+    for key, entry in pairs(value) do
+        copy[cloneTable(key, nestedSeen)] = cloneTable(entry, nestedSeen)
+    end
+
+    return copy
+end
+
+local function shouldCloneLoadedTable(path)
+    return type(path) == "string" and path:sub(1, 9) == "app/menu/"
 end
 
 local function loadLuaTable(path)
     if type(path) ~= "string" or path == "" then
         return nil, "invalid path"
+    end
+
+    if LUA_TABLE_CACHE[path] ~= nil then
+        if shouldCloneLoadedTable(path) then
+            return cloneTable(LUA_TABLE_CACHE[path])
+        end
+        return LUA_TABLE_CACHE[path]
     end
 
     local chunk, loadErr = loadfile(path)
@@ -78,6 +209,12 @@ local function loadLuaTable(path)
 
     if type(value) ~= "table" then
         return nil, "module did not return table"
+    end
+
+    LUA_TABLE_CACHE[path] = value
+
+    if shouldCloneLoadedTable(path) then
+        return cloneTable(value)
     end
 
     return value
@@ -113,66 +250,6 @@ local function loadMenuVisibilityModule()
     return nil
 end
 
-local function isCloseEvent(category, value)
-    return ethos_events.isCloseEvent(category, value)
-end
-
-local function isSaveKeyEvent(value)
-    return ethos_events.matchesAnyConstant(value, {
-        "KEY_ENTER_LONG",
-        "KEY_PAGE_LONG"
-    })
-end
-
-local function isMenuKeyEvent(value)
-    return ethos_events.matchesAnyConstant(value, {
-        "KEY_RTN",
-        "KEY_RTN_FIRST",
-        "KEY_RTN_BREAK"
-    })
-end
-
-local function isRotaryNavigationEvent(value)
-    return ethos_events.matchesAnyConstant(value, {
-        "KEY_ROTARY_LEFT",
-        "KEY_ROTARY_RIGHT"
-    })
-end
-
-local function isExitLongEvent(value)
-    return ethos_events.matchesAnyConstant(value, {
-        "KEY_RTN_LONG"
-    })
-end
-
-local function suppressFollowupKeyEvent(value)
-    local breakName = nil
-    local breakValue
-
-    if not (system and system.killEvents) then
-        return
-    end
-
-    if ethos_events.matchesConstant(value, "KEY_ENTER_LONG") then
-        breakName = "KEY_ENTER_BREAK"
-    elseif ethos_events.matchesConstant(value, "KEY_PAGE_LONG") then
-        breakName = "KEY_PAGE_BREAK"
-    elseif ethos_events.matchesConstant(value, "KEY_RTN") or ethos_events.matchesConstant(value, "KEY_RTN_FIRST") then
-        breakName = "KEY_RTN_BREAK"
-    elseif ethos_events.matchesConstant(value, "KEY_RTN_LONG") then
-        breakName = "KEY_RTN_BREAK"
-    end
-
-    if breakName == nil then
-        return
-    end
-
-    breakValue = ethos_events.getConstant(breakName)
-    if breakValue ~= nil then
-        pcall(system.killEvents, breakValue)
-    end
-end
-
 local function formatValue(value, format)
     if value == nil then
         return "--"
@@ -197,10 +274,6 @@ local function safeFormClear()
     if form and form.clear then
         form.clear()
     end
-end
-
-local function normalizeNodeKey(source)
-    return tostring(source or "root"):gsub("[^%w]+", "_")
 end
 
 local function trimText(value)
@@ -232,19 +305,14 @@ function App:init(framework)
 
     self.framework = framework
     self.callback = callbackFactory.new()
+    self.shared = sharedContextFactory.new(self)
     self.telemetryTask = nil
     self.menuAccessSignature = nil
     self.menuEnableSignature = nil
     self.startupLoaderStage = 0
     self.startupJob = nil
-    self._startupCallback = function()
-        self:_runStartupPreparationStep()
-    end
     self.maintenanceScheduled = false
     self.maintenancePhase = 0
-    self._maintenanceCallback = function()
-        self:_runDeferredMaintenanceStep()
-    end
     radioConfig, radioErr = loadLuaTable("app/radios.lua")
     if type(radioConfig) ~= "table" then
         error("failed to load app/radios.lua: " .. tostring(radioErr))
@@ -260,8 +328,8 @@ function App:init(framework)
     self.valueFields = {}
     self.buttonFields = {}
     self.navFields = {}
-    self.maskCache = {}
-    self.maskCacheOrder = {}
+    self.maskCache = SHARED_MASK_CACHE
+    self.maskCacheOrder = SHARED_MASK_CACHE_ORDER
     self.pageDirty = false
     self.dirtySuspendDepth = 0
     self.returnMenuArmed = false
@@ -271,11 +339,6 @@ function App:init(framework)
     self.modalDialogDepth = 0
     self.formBuildCount = 0
     self.mspTask = nil
-    self.loader = {
-        active = nil,
-        status = nil,
-        signature = nil
-    }
     self.loaderSpeed = {
         VSLOW = 0.5,
         SLOW = 0.75,
@@ -283,53 +346,455 @@ function App:init(framework)
         FAST = 2.3,
         VFAST = 2.8
     }
+    self.loaderController = loaderControllerFactory.new(self.shared, {
+        minVisible = LOADER_MIN_VISIBLE,
+        fallbackClose = LOADER_FALLBACK_CLOSE,
+        progressMultiplier = LOADER_PROGRESS_MULTIPLIER,
+        menuProgressFactor = MENU_LOADER_PROGRESS_FACTOR,
+        timeoutMessage = LOADER_TIMEOUT_MESSAGE,
+        timeoutDetail = LOADER_TIMEOUT_DETAIL,
+        transferPlaceholder = MSP_DEBUG_PLACEHOLDER,
+        audio = AudioLib,
+        generalBool = function(key, default)
+            return self:_generalBool(key, default)
+        end,
+        mspTask = function()
+            return self:_msp()
+        end,
+        modalUiActive = function()
+            return self:_modalUiActive()
+        end,
+        focusNavigationButton = function(key)
+            return self:_focusNavigationButton(key)
+        end,
+        restoreAppFocus = function()
+            return self:_restoreAppFocus()
+        end
+    })
+    self.loader = self.loaderController.state
+    self.menuController = menuControllerFactory.new(self.shared, {
+        menuRootPath = MENU_ROOT_PATH,
+        onSyncState = function(state)
+            self:_syncMenuState(state)
+        end,
+        currentMenuAccessSignature = function()
+            return self:_currentMenuAccessSignatureLegacy()
+        end,
+        currentMenuEnableSignature = function()
+            return self:_currentMenuEnableSignatureLegacy()
+        end,
+        itemEnabled = function(item)
+            return self:_itemEnabled(item)
+        end,
+        reloadCurrentMenuNode = function()
+            return self:_reloadCurrentMenuNode()
+        end,
+        invalidateForm = function()
+            return self:_invalidateForm()
+        end,
+        modalUiActive = function()
+            return self:_modalUiActive()
+        end,
+        focusNavigationButton = function(key)
+            return self:_focusNavigationButton(key)
+        end
+    })
+    self:_syncMenuState(self.menuController.state)
+    self.navigationController = navigationControllerFactory.new(self.shared, {
+        getCurrentNode = function()
+            return self.currentNode
+        end,
+        getCurrentNodeSource = function()
+            return self.currentNodeSource
+        end,
+        getPathStack = function()
+            return self.pathStack
+        end,
+        headerMetrics = function()
+            return self:_headerMetrics()
+        end,
+        headerNavY = function()
+            return self:_headerNavY()
+        end,
+        headerTitlePos = function()
+            return self:_headerTitlePos()
+        end,
+        collapseNavigation = function()
+            return self:_collapseNavigation()
+        end,
+        loadMask = function(path)
+            return self:_loadMask(path)
+        end,
+        canSaveNode = function(node)
+            return self:_canSaveNode(node)
+        end,
+        handleMenuAction = function()
+            return self:_handleMenuAction()
+        end,
+        handleSaveAction = function()
+            return self:_handleSaveAction()
+        end,
+        handleReloadAction = function()
+            return self:_handleReloadAction()
+        end,
+        handleToolAction = function()
+            return self:_handleToolAction()
+        end,
+        handleHelpAction = function()
+            return self:_handleHelpAction()
+        end,
+        getNavFields = function()
+            return self.navFields
+        end,
+        setNavField = function(key, field)
+            self.navFields[key] = field
+            if self.formHost and self.formHost._sync then
+                self.formHost:_sync()
+            end
+        end,
+        getHeaderTitleField = function()
+            return self.headerTitleField
+        end,
+        setHeaderTitleField = function(field)
+            self.headerTitleField = field
+            if self.formHost and self.formHost.state then
+                self.formHost.state.headerTitleField = field
+                if self.formHost._sync then
+                    self.formHost:_sync()
+                end
+            end
+        end
+    })
+    self.actionsController = actionsControllerFactory.new(self.shared, {
+        getCurrentNode = function()
+            return self.currentNode
+        end,
+        getPathStack = function()
+            return self.pathStack
+        end,
+        runNodeHook = function(node, hookName, ...)
+            return self:_runNodeHook(node, hookName, ...)
+        end,
+        canSaveNode = function(node)
+            return self:_canSaveNode(node)
+        end,
+        confirmBeforeSave = function()
+            return self:_confirmBeforeSave()
+        end,
+        confirmBeforeReload = function()
+            return self:_confirmBeforeReload()
+        end,
+        setPageDirty = function(isDirty)
+            return self:setPageDirty(isDirty)
+        end,
+        requestExit = function()
+            return self:_requestExit()
+        end,
+        goBack = function()
+            return self:_goBack()
+        end
+    })
+    self.eventsController = eventsControllerFactory.new(self.shared, {
+        clearFocusRestore = function()
+            if self.menuController and self.menuController.clearFocusRestore then
+                self.menuController:clearFocusRestore()
+            else
+                self.pendingFocusRestore = false
+            end
+        end,
+        getModalDialogDepth = function()
+            return self.modalDialogDepth or 0
+        end,
+        isLoaderModalActive = function()
+            return self.loader and self.loader.active and self.loader.active.modal == true
+        end,
+        getReturnMenuArmed = function()
+            return self.returnMenuArmed == true
+        end,
+        setReturnMenuArmed = function(value)
+            self.returnMenuArmed = value == true
+        end,
+        requestExit = function()
+            return self:_requestExit()
+        end,
+        focusNavigationButton = function(key)
+            return self:_focusNavigationButton(key)
+        end,
+        handleMenuAction = function()
+            return self:_handleMenuAction()
+        end,
+        handleSaveAction = function()
+            return self:_handleSaveAction()
+        end,
+        navButtonsForNode = function(node)
+            return self:_navButtonsForNode(node)
+        end,
+        getCurrentNode = function()
+            return self.currentNode
+        end,
+        runNodeHook = function(node, hookName, ...)
+            return self:_runNodeHook(node, hookName, ...)
+        end
+    })
+    self.lifecycleController = lifecycleControllerFactory.new(self.shared, {
+        onSyncState = function(state)
+            self:_syncLifecycleState(state)
+        end,
+        armStartupSensors = function()
+            local sensorsTask = self.framework and self.framework.getTask and self.framework:getTask("sensors") or nil
+            if sensorsTask and type(sensorsTask.armSensorLostMute) == "function" then
+                sensorsTask:armSensorLostMute(STARTUP_SENSOR_LOST_MUTE)
+            end
+        end,
+        resetLoader = function()
+            if self.loaderController then
+                self.loaderController:reset()
+            end
+        end,
+        resetMenu = function()
+            if self.menuController then
+                self.menuController:reset()
+            end
+        end,
+        primeMenuSignatures = function(accessSig, enableSig)
+            if self.menuController and self.menuController.primeSignatures then
+                self.menuController:primeSignatures(accessSig, enableSig)
+            else
+                self.menuAccessSignature = accessSig
+                self.menuEnableSignature = enableSig
+            end
+        end,
+        currentMenuAccessSignature = function()
+            return self:_currentMenuAccessSignatureLegacy()
+        end,
+        currentMenuEnableSignature = function()
+            return self:_currentMenuEnableSignatureLegacy()
+        end,
+        clearAllCallbacks = function()
+            if self.callback then
+                self.callback:clearAll()
+            end
+        end,
+        closeCurrentNode = function()
+            return self:_closeNode(self.currentNode)
+        end,
+        clearForm = function()
+            safeFormClear()
+        end,
+        resetFormHost = function()
+            if self.formHost then
+                self.formHost:reset()
+            end
+        end,
+        resetPageHost = function()
+            if self.pageHost then
+                self.pageHost:reset()
+            end
+        end,
+        resetCurrentNodeFallback = function(nilPathStack)
+            self.currentNode = nil
+            self.pathStack = nilPathStack and nil or {}
+        end,
+        clearMaskCache = function()
+            -- Keep masks warm across app close/open cycles.
+            return
+        end,
+        nilMaskCache = function()
+            -- Keep masks warm across app close/open cycles.
+            return
+        end,
+        clearAppModuleCaches = function()
+            clearAppModuleCaches()
+        end,
+        savePreferences = function()
+            return self:_savePreferences()
+        end,
+        collectGarbage = function(mode)
+            if mode == "collect" then
+                pcall(collectgarbage, "collect")
+            else
+                pcall(collectgarbage, "step", 64)
+            end
+        end,
+        loadRoot = function()
+            if self.pageHost then
+                self.pageHost:openRoot()
+            else
+                self:_closeNode(self.currentNode)
+                self:setPageDirty(false)
+                self.pathStack = {}
+                self.currentNodeSource = MENU_ROOT_PATH
+                self.currentNode = self:_loadRootNode()
+                self:_afterNodeChanged()
+                self:_invalidateForm()
+            end
+        end,
+        resetSnapshot = function()
+            self.snapshot = nil
+        end,
+        resetTelemetryTask = function()
+            self.telemetryTask = nil
+        end,
+        resetFramework = function()
+            self.framework = nil
+        end
+    })
+    self:_syncLifecycleState(self.lifecycleController.state)
+    self.formHost = formHostControllerFactory.new(self.shared, {
+        onSyncState = function(state)
+            self:_syncFormHostState(state)
+        end,
+        clearForm = function()
+            safeFormClear()
+        end,
+        nodeHasMenuItems = function(node)
+            return self:_nodeHasMenuItems(node)
+        end,
+        collectNodeIconPaths = function(node)
+            return self:_collectNodeIconPaths(node)
+        end,
+        loadMask = function(path)
+            return self:_loadMask(path)
+        end,
+        loadRootNode = function()
+            return self:_loadRootNode()
+        end,
+        addHeader = function(node)
+            return self:_addHeader(node)
+        end,
+        runNodeHook = function(node, hookName, ...)
+            return self:_runNodeHook(node, hookName, ...)
+        end,
+        addStaticLine = function(label, value, key)
+            return self:_addStaticLine(label, value, key)
+        end,
+        buildGridButtons = function(items)
+            return self:_buildGridButtons(items)
+        end,
+        currentMenuEnableSignature = function()
+            return self:_currentMenuEnableSignature()
+        end,
+        setMenuEnableSignature = function(signature)
+            if self.menuController and self.menuController.setMenuEnableSignature then
+                self.menuController:setMenuEnableSignature(signature)
+            else
+                self.menuEnableSignature = signature
+            end
+        end,
+        clearMenuFocusRestore = function()
+            if self.menuController and self.menuController.clearFocusRestore then
+                self.menuController:clearFocusRestore()
+            else
+                self.pendingFocusRestore = false
+            end
+        end,
+        syncSaveButtonState = function()
+            return self:_syncSaveButtonState()
+        end,
+        restoreAppFocus = function()
+            if self.pendingFocusRestore == true then
+                return self:_restoreAppFocus()
+            end
+            return false
+        end,
+        resolveItemValue = function(item)
+            return self:_resolveItemValue(item)
+        end
+    })
+    self:_syncFormHostState(self.formHost.state)
+    self.pageHost = pageHostControllerFactory.new(self.shared, {
+        menuRootPath = MENU_ROOT_PATH,
+        onSyncState = function(state)
+            self:_syncPageHostState(state)
+        end,
+        loadRootNode = function()
+            return self:_loadRootNode()
+        end,
+        loadNodeFromSource = function(source)
+            return self:_loadNodeFromSource(source)
+        end,
+        loadPageNode = function(item, breadcrumb)
+            return self:_loadPageNode(item, breadcrumb)
+        end,
+        makeLeafNode = function(item, breadcrumb)
+            return self:_makeLeafNode(item, breadcrumb)
+        end,
+        closeNode = function(node)
+            return self:_closeNode(node)
+        end,
+        afterNodeChanged = function()
+            return self:_afterNodeChanged()
+        end,
+        invalidateForm = function()
+            return self:_invalidateForm()
+        end,
+        setPageDirty = function(value)
+            return self:setPageDirty(value)
+        end,
+        requestAppFocusRestore = function()
+            return self:_requestAppFocusRestore()
+        end,
+        setSelectedIndex = function(source, index)
+            return self:_setSelectedIndex(source, index)
+        end,
+        showLoader = function(options)
+            return self:showLoader(options)
+        end,
+        updateLoader = function(options)
+            return self:updateLoader(options)
+        end,
+        clearLoader = function(force)
+            return self:clearLoader(force)
+        end
+    })
+    self:_syncPageHostState(self.pageHost.state)
     self.ui = self:_createUiBridge()
     self:_installDirtyCallbackWrappers()
 end
 
 function App:_clearFormRefs()
-    self.statusFields = {}
-    self.valueFields = {}
-    self.buttonFields = {}
-    self.navFields = {}
-    self.headerTitleField = nil
+    self.formHost:clearFormRefs()
+end
+
+function App:_syncPageHostState(state)
+    local hostState = state or (self.pageHost and self.pageHost.state) or {}
+
+    self.currentNode = hostState.currentNode
+    self.currentNodeSource = hostState.currentNodeSource or MENU_ROOT_PATH
+    self.pathStack = hostState.pathStack or {}
+end
+
+function App:_syncMenuState(state)
+    local menuState = state or (self.menuController and self.menuController.state) or {}
+
+    self.menuAccessSignature = menuState.menuAccessSignature
+    self.menuEnableSignature = menuState.menuEnableSignature
+    self.pendingFocusRestore = menuState.pendingFocusRestore == true
+end
+
+function App:_syncFormHostState(state)
+    local formState = state or (self.formHost and self.formHost.state) or {}
+
+    self.formDirty = formState.formDirty == true
+    self.formBuildCount = formState.formBuildCount or 0
+    self.statusFields = formState.statusFields or {}
+    self.valueFields = formState.valueFields or {}
+    self.buttonFields = formState.buttonFields or {}
+    self.navFields = formState.navFields or {}
+    self.headerTitleField = formState.headerTitleField
+end
+
+function App:_syncLifecycleState(state)
+    local lifecycleState = state or (self.lifecycleController and self.lifecycleController.state) or {}
+
+    self.startupLoaderStage = lifecycleState.startupLoaderStage or 0
+    self.startupJob = lifecycleState.startupJob
+    self.maintenanceScheduled = lifecycleState.maintenanceScheduled == true
+    self.maintenancePhase = lifecycleState.maintenancePhase or 0
 end
 
 function App:_invalidateForm()
-    self.formDirty = true
-    if form and form.invalidate then
-        form.invalidate()
-    end
-end
-
-function App:_menuState()
-    local prefs = self.framework and self.framework.preferences
-    local state
-    local legacy
-    local key
-
-    if not prefs or not prefs.section then
-        return {}
-    end
-
-    state = prefs:section("menulastselected", {})
-    legacy = prefs:section("menu_state", {})
-
-    for key, value in pairs(legacy or {}) do
-        if state[key] == nil then
-            state[key] = value
-        end
-    end
-
-    return state
-end
-
-function App:_selectedIndexKey(source)
-    if source == MENU_ROOT_PATH then
-        return "mainmenu"
-    end
-
-    return "sel_" .. normalizeNodeKey(source)
+    self.formHost:invalidate()
 end
 
 function App:_generalPrefs()
@@ -367,30 +832,11 @@ function App:_generalBool(key, default)
 end
 
 function App:_getSelectedIndex(source)
-    local state = self:_menuState()
-    local key = self:_selectedIndexKey(source)
-    local value = tonumber(state[key])
-
-    if value == nil and source == MENU_ROOT_PATH then
-        value = tonumber(state["sel_" .. normalizeNodeKey(source)])
-    end
-
-    if value == nil or value < 1 then
-        return 1
-    end
-    return value
+    return self.menuController:getSelectedIndex(source)
 end
 
 function App:_setSelectedIndex(source, index)
-    local state = self:_menuState()
-    local value = tonumber(index) or 1
-    local key = self:_selectedIndexKey(source)
-
-    state[key] = value
-
-    if source == MENU_ROOT_PATH then
-        state["sel_" .. normalizeNodeKey(source)] = value
-    end
+    self.menuController:setSelectedIndex(source, index)
 end
 
 function App:_savePreferences()
@@ -520,8 +966,7 @@ function App:_pruneMaskCacheForNode(node)
 end
 
 function App:_afterNodeChanged()
-    self:_pruneMaskCacheForNode(self.currentNode)
-    pcall(collectgarbage, "step", 64)
+    return self.lifecycleController:afterNodeChanged()
 end
 
 function App:_reportNodeError(context, err)
@@ -624,22 +1069,11 @@ function App:_canSaveNode(node)
 end
 
 function App:_syncSaveButtonState()
-    local save = self.navFields and self.navFields.save
-
-    if save and save.enable then
-        save:enable(self:_canSaveNode(self.currentNode))
-    end
+    return self.navigationController:syncSaveButtonState()
 end
 
 function App:_focusNavigationButton(key)
-    local field = self.navFields and self.navFields[key] or nil
-
-    if field and field.focus then
-        pcall(field.focus, field)
-        return true
-    end
-
-    return false
+    return self.navigationController:focusNavigationButton(key)
 end
 
 function App:_modalUiActive()
@@ -647,96 +1081,12 @@ function App:_modalUiActive()
         or ((self.modalDialogDepth or 0) > 0)
 end
 
-function App:_openManagedDialog(options)
-    local opts = type(options) == "table" and options or {}
-    local buttons = {}
-    local index
-    local button
-    local originalAction
-
-    if not (form and form.openDialog) then
-        return nil
-    end
-
-    self.modalDialogDepth = (self.modalDialogDepth or 0) + 1
-
-    for index = 1, #(opts.buttons or {}) do
-        button = {}
-        for key, value in pairs(opts.buttons[index]) do
-            button[key] = value
-        end
-        originalAction = button.action
-        button.action = function(...)
-            self.modalDialogDepth = math.max(0, (self.modalDialogDepth or 0) - 1)
-            if type(originalAction) == "function" then
-                return originalAction(...)
-            end
-            return true
-        end
-        buttons[#buttons + 1] = button
-    end
-
-    opts.buttons = buttons
-    return form.openDialog(opts)
-end
-
 function App:_requestAppFocusRestore()
-    self.pendingFocusRestore = true
-end
-
-function App:_hasMenuButtons()
-    return next(self.buttonFields or {}) ~= nil
+    self.menuController:requestFocusRestore()
 end
 
 function App:_restoreAppFocus()
-    local items = self.currentNode and self.currentNode.items or nil
-    local selectedIndex = self:_getSelectedIndex(self.currentNodeSource)
-    local buttonIndex = 0
-    local firstEnabledField = nil
-    local selectedField = nil
-    local selectedEnabled = false
-    local item
-    local field
-    local enabled
-
-    if self:_modalUiActive() == true then
-        return false
-    end
-
-    if type(items) == "table" and next(self.buttonFields or {}) ~= nil then
-        for _, item in ipairs(items) do
-            if item.kind == "menu" or item.kind == "page" then
-                buttonIndex = buttonIndex + 1
-                field = self.buttonFields[buttonIndex]
-                enabled = self:_itemEnabled(item)
-                if enabled and firstEnabledField == nil and field then
-                    firstEnabledField = field
-                end
-                if buttonIndex == selectedIndex then
-                    selectedField = field
-                    selectedEnabled = enabled == true
-                end
-            end
-        end
-
-        if selectedEnabled == true and selectedField and selectedField.focus then
-            pcall(selectedField.focus, selectedField)
-            self.pendingFocusRestore = false
-            return true
-        end
-        if firstEnabledField and firstEnabledField.focus then
-            pcall(firstEnabledField.focus, firstEnabledField)
-            self.pendingFocusRestore = false
-            return true
-        end
-    end
-
-    if self:_focusNavigationButton("menu") == true then
-        self.pendingFocusRestore = false
-        return true
-    end
-
-    return false
+    return self.menuController:restoreFocus(self.currentNode, self.currentNodeSource, self.buttonFields or {})
 end
 
 function App:setPageDirty(isDirty)
@@ -761,151 +1111,24 @@ function App:resumeDirtyTracking()
     return self.dirtySuspendDepth
 end
 
-function App:_confirmAction(title, message, action)
-    if not (form and form.openDialog) then
-        return action()
-    end
-
-    self.modalDialogDepth = (self.modalDialogDepth or 0) + 1
-
-    form.openDialog({
-        width = nil,
-        title = title,
-        message = message,
-        buttons = {
-            {
-                label = "OK",
-                action = function()
-                    self.modalDialogDepth = math.max(0, (self.modalDialogDepth or 0) - 1)
-                    self.pendingDialogAction = action
-                    self.pendingDialogActionReady = false
-                    return true
-                end
-            },
-            {
-                label = "Cancel",
-                action = function()
-                    self.modalDialogDepth = math.max(0, (self.modalDialogDepth or 0) - 1)
-                    return true
-                end
-            }
-        },
-        wakeup = function() end,
-        paint = function() end,
-        options = TEXT_LEFT
-    })
-    return true
-end
-
 function App:_handleSaveAction()
-    local result
-    local customResult
-    local handled
-
-    if not self:_canSaveNode(self.currentNode) then
-        return false
-    end
-
-    customResult, handled = self:_runNodeHook(self.currentNode, "onSaveMenu")
-    if handled == true then
-        return customResult ~= false
-    end
-
-    local function runSave()
-        result = self:_runNodeHook(self.currentNode, "save")
-        if result == false then
-            return false
-        end
-        self:setPageDirty(false)
-        return true
-    end
-
-    if self:_confirmBeforeSave() == true then
-        return self:_confirmAction("Save Settings", "Save changes?", runSave)
-    end
-
-    return runSave()
+    return self.actionsController:handleSaveAction()
 end
 
 function App:_handleReloadAction()
-    local result
-    local customResult
-    local handled
-
-    customResult, handled = self:_runNodeHook(self.currentNode, "onReloadMenu")
-    if handled == true then
-        return customResult ~= false
-    end
-
-    local function runReload()
-        result = self:_runNodeHook(self.currentNode, "reload")
-        if result == false then
-            return false
-        end
-        self:setPageDirty(false)
-        return true
-    end
-
-    if self:_confirmBeforeReload() == true then
-        return self:_confirmAction("Reload Settings", "Discard changes and reload?", runReload)
-    end
-
-    return runReload()
+    return self.actionsController:handleReloadAction()
 end
 
 function App:_handleMenuAction()
-    local result
-    local handled
-
-    result, handled = self:_runNodeHook(self.currentNode, "onNavMenu")
-    if handled == true then
-        return result ~= false
-    end
-
-    result, handled = self:_runNodeHook(self.currentNode, "menu")
-    if handled == true then
-        return result ~= false
-    end
-
-    if #self.pathStack == 0 then
-        return self:_requestExit()
-    end
-
-    return self:_goBack()
+    return self.actionsController:handleMenuAction()
 end
 
 function App:_handleToolAction()
-    local result
-    local handled
-
-    result, handled = self:_runNodeHook(self.currentNode, "onToolMenu")
-    if handled == true then
-        return result ~= false
-    end
-
-    result, handled = self:_runNodeHook(self.currentNode, "tool")
-    if handled == true then
-        return result ~= false
-    end
-
-    return false
+    return self.actionsController:handleToolAction()
 end
 
 function App:_handleHelpAction()
-    local result
-    local handled
-
-    result, handled = self:_runNodeHook(self.currentNode, "onHelpMenu")
-    if handled == true then
-        return result ~= false
-    end
-
-    result, handled = self:_runNodeHook(self.currentNode, "help")
-    if handled == true then
-        return result ~= false
-    end
-
-    return false
+    return self.actionsController:handleHelpAction()
 end
 
 function App:_runNodeHook(node, hookName, ...)
@@ -1344,248 +1567,45 @@ function App:_tripLoaderWatchdog(active)
 end
 
 function App:_refreshLoaderState()
-    local now = os.clock()
-    local active = self.loader.active
-    local signature
-    local progressValue
-    local mult
-    local focusMenuOnClose = false
-    local restoreFocusOnClose = false
-
-    if active then
-        mult = active.speed or 1.0
-        progressValue = tonumber(active.progressValue)
-        if active.closeRequested == true then
-            active.progressCounter = math.min(100, (active.progressCounter or 0) + (15 * mult))
-        elseif progressValue == nil then
-            local progressFactor = (active.kind == "menu") and MENU_LOADER_PROGRESS_FACTOR or (active.closeWhenIdle == true and 2 or 1.2)
-            active.progressCounter = math.min((active.kind == "menu") and 95 or 99, (active.progressCounter or 0) + (mult * LOADER_PROGRESS_MULTIPLIER * progressFactor))
-        else
-            active.progressCounter = math.max(0, math.min(100, progressValue))
-        end
-        if active.pendingClose == true and now >= (active.minVisibleUntil or 0) then
-            focusMenuOnClose = active.focusMenuOnClose == true
-            restoreFocusOnClose = active.restoreFocusOnClose == true
-            self:_closeLoaderDialog(active.handle)
-            self.loader.active = nil
-            active = nil
-        elseif active
-            and active.closeRequested == true
-            and active.timedOut ~= true
-            and now >= (active.minVisibleUntil or 0)
-            and (active.progressCounter or 0) >= 100 then
-            focusMenuOnClose = active.focusMenuOnClose == true
-            restoreFocusOnClose = active.restoreFocusOnClose == true
-            self:_closeLoaderDialog(active.handle)
-            self.loader.active = nil
-            active = nil
-        elseif active.timedOut ~= true and active.watchdogDeadline and now >= active.watchdogDeadline then
-            self:_tripLoaderWatchdog(active)
-        elseif active
-            and active.timedOut ~= true
-            and active.closeWhenIdle == true
-            and now >= (active.minVisibleUntil or 0)
-            and self:_loaderBusyState() ~= true
-            and now >= (active.fallbackCloseAt or 0) then
-            restoreFocusOnClose = active.restoreFocusOnClose == true
-            self:_closeLoaderDialog(active.handle)
-            self.loader.active = nil
-            active = nil
-        end
+    if self.loaderController then
+        return self.loaderController:refresh()
     end
-
-    self.loader.status = nil
-    if active then
-        self:_syncLoaderDialog()
-    else
-        if focusMenuOnClose == true then
-            if self:_modalUiActive() == true then
-                self.pendingFocusRestore = true
-            else
-                self.pendingFocusRestore = false
-                self:_focusNavigationButton("menu")
-            end
-        elseif restoreFocusOnClose == true then
-            if self:_modalUiActive() == true then
-                self.pendingFocusRestore = true
-            else
-                self.pendingFocusRestore = true
-                self:_restoreAppFocus()
-            end
-        end
-    end
-    signature = self:_loaderSignature(active)
-    self.loader.signature = signature
-end
-
-function App:_loaderSpeed(speed)
-    local value = tonumber(speed)
-
-    if value ~= nil and value > 0 then
-        return value
-    end
-
-    return self.loaderSpeed.DEFAULT
-end
-
-function App:_showMenuNavigationLoader(title, detail, speed)
-    local _ = title
-    _ = detail
-    _ = speed
-end
-
-function App:_clearMenuNavigationLoader()
-    return
+    return nil
 end
 
 function App:showLoader(options)
-    local opts = type(options) == "table" and options or {}
-    local now = os.clock()
-    local kind = opts.kind or "progress"
-    local defaultTitle = kind == "save" and "Saving" or "Loading"
-    local defaultMessage = kind == "save" and "Saving settings." or "Loading from flight controller."
-    local watchdogTimeout = self:_loaderWatchdogTimeout(kind, opts.watchdogTimeout or opts.watchdog)
-
-    self.loader.active = {
-        kind = kind,
-        title = self:_loaderText(opts.title, defaultTitle),
-        message = self:_loaderText(opts.message, defaultMessage),
-        detail = self:_loaderText(opts.detail, ""),
-        speed = self:_loaderSpeed(opts.speed),
-        modal = opts.modal ~= false,
-        closeWhenIdle = opts.closeWhenIdle ~= false,
-        allowClose = opts.allowClose == true,
-        createdAt = now,
-        minVisibleUntil = now + (tonumber(opts.minVisibleFor) or LOADER_MIN_VISIBLE),
-        fallbackCloseAt = now + (tonumber(opts.fallbackCloseAfter) or LOADER_FALLBACK_CLOSE),
-        watchdogDeadline = watchdogTimeout and (now + watchdogTimeout) or nil,
-        pendingClose = false,
-        closeRequested = false,
-        focusMenuOnClose = opts.focusMenuOnClose == true,
-        restoreFocusOnClose = opts.restoreFocusOnClose == true,
-        timedOut = false,
-        debug = opts.debug ~= false,
-        transferInfo = opts.transferInfo == true,
-        progressCounter = 0,
-        progressValue = tonumber(opts.progressValue)
-    }
-    self.loader.active.handle = self:_openLoaderDialog(
-        self.loader.active.title,
-        self:_loaderMessage(self.loader.active)
-    )
-    self:_refreshLoaderState()
-    return self.loader.active
+    if self.loaderController then
+        return self.loaderController:show(options)
+    end
+    return nil
 end
 
 function App:updateLoader(options)
-    local opts = type(options) == "table" and options or {}
-    local active = self.loader.active
-
-    if active == nil then
-        return self:showLoader(opts)
+    if self.loaderController then
+        return self.loaderController:update(options)
     end
-
-    if opts.title ~= nil then
-        active.title = self:_loaderText(opts.title, active.title)
-    end
-    if opts.message ~= nil then
-        active.message = self:_loaderText(opts.message, active.message)
-    end
-    if opts.detail ~= nil then
-        active.detail = self:_loaderText(opts.detail, active.detail)
-    end
-    if opts.speed ~= nil then
-        active.speed = self:_loaderSpeed(opts.speed)
-    end
-    if opts.closeWhenIdle ~= nil then
-        active.closeWhenIdle = opts.closeWhenIdle == true
-    end
-    if opts.allowClose ~= nil then
-        active.allowClose = opts.allowClose == true
-    end
-    if opts.transferInfo ~= nil then
-        active.transferInfo = opts.transferInfo == true
-    end
-    if opts.progressValue ~= nil then
-        active.progressValue = tonumber(opts.progressValue)
-    end
-    if opts.watchdogTimeout ~= nil or opts.watchdog ~= nil then
-        local watchdogTimeout = self:_loaderWatchdogTimeout(active.kind, opts.watchdogTimeout or opts.watchdog)
-        active.watchdogDeadline = watchdogTimeout and (os.clock() + watchdogTimeout) or nil
-        active.timedOut = false
-    elseif opts.title ~= nil or opts.message ~= nil or opts.detail ~= nil then
-        local watchdogTimeout = self:_loaderWatchdogTimeout(active.kind, true)
-        if watchdogTimeout then
-            active.watchdogDeadline = os.clock() + watchdogTimeout
-            active.timedOut = false
-        end
-    end
-
-    self:_refreshLoaderState()
-    return active
+    return nil
 end
 
 function App:clearLoader(force)
-    local active = self.loader.active
-    local now = os.clock()
-    local focusMenuOnClose = false
-    local restoreFocusOnClose = false
-
-    if active == nil then
-        self:_refreshLoaderState()
-        return true
-    end
-
-    if force == true or now >= (active.minVisibleUntil or 0) then
-        focusMenuOnClose = active.focusMenuOnClose == true
-        restoreFocusOnClose = active.restoreFocusOnClose == true
-        self:_closeLoaderDialog(active.handle)
-        self.loader.active = nil
-    else
-        active.pendingClose = true
-    end
-
-    self:_refreshLoaderState()
-    if self.loader.active == nil then
-        if focusMenuOnClose == true then
-            if self:_modalUiActive() == true then
-                self.pendingFocusRestore = true
-            else
-                self.pendingFocusRestore = false
-                self:_focusNavigationButton("menu")
-            end
-        elseif restoreFocusOnClose == true then
-            if self:_modalUiActive() == true then
-                self.pendingFocusRestore = true
-            else
-                self.pendingFocusRestore = true
-                self:_restoreAppFocus()
-            end
-        end
+    if self.loaderController then
+        return self.loaderController:clear(force)
     end
     return true
 end
 
 function App:requestLoaderClose()
-    local active = self.loader.active
-
-    if active == nil then
-        return true
+    if self.loaderController then
+        self.loaderController:requestClose()
     end
-
-    active.closeRequested = true
-    active.pendingClose = true
-    active.closeWhenIdle = false
-    active.progressValue = 100
-    active.watchdogDeadline = nil
-    active.timedOut = false
-    self:_refreshLoaderState()
     return true
 end
 
 function App:isLoaderActive()
-    self:_refreshLoaderState()
-    return self.loader.active ~= nil
+    if self.loaderController then
+        return self.loaderController:isActive()
+    end
+    return false
 end
 
 function App:_headerNavY()
@@ -1776,25 +1796,10 @@ function App:_itemEnabled(item)
 end
 
 function App:_nodeHasMenuItems(node)
-    local items = node and node.items or nil
-    local index
-    local item
-
-    if type(items) ~= "table" then
-        return false
-    end
-
-    for index = 1, #items do
-        item = items[index]
-        if item and (item.kind == "menu" or item.kind == "page") then
-            return true
-        end
-    end
-
-    return false
+    return self.menuController:nodeHasMenuItems(node)
 end
 
-function App:_currentMenuAccessSignature()
+function App:_currentMenuAccessSignatureLegacy()
     local visibility = loadMenuVisibilityModule()
 
     if visibility and type(visibility.accessSignature) == "function" then
@@ -1804,7 +1809,11 @@ function App:_currentMenuAccessSignature()
     return "default"
 end
 
-function App:_currentMenuEnableSignature()
+function App:_currentMenuAccessSignature()
+    return self.menuController.currentMenuAccessSignature()
+end
+
+function App:_currentMenuEnableSignatureLegacy()
     local visibility = loadMenuVisibilityModule()
 
     if visibility and type(visibility.connectionMode) == "function" then
@@ -1812,6 +1821,10 @@ function App:_currentMenuEnableSignature()
     end
 
     return "default"
+end
+
+function App:_currentMenuEnableSignature()
+    return self.menuController.currentMenuEnableSignature()
 end
 
 function App:_reloadCurrentMenuNode()
@@ -1840,150 +1853,27 @@ function App:_reloadCurrentMenuNode()
 end
 
 function App:_refreshMenuAccess()
-    local signature = self:_currentMenuAccessSignature()
-
-    if self.menuAccessSignature == signature then
-        return
-    end
-
-    self.menuAccessSignature = signature
-    self:_reloadCurrentMenuNode()
-    self:_invalidateForm()
+    self.menuController:refreshMenuAccess()
 end
 
 function App:_syncMenuButtonStates()
-    local buttonIndex = 0
-    local items = self.currentNode and self.currentNode.items or nil
-    local selectedIndex = self:_getSelectedIndex(self.currentNodeSource)
-    local firstEnabledField = nil
-    local selectedField = nil
-    local selectedEnabled = false
-    local signature = self:_currentMenuEnableSignature()
-    local signatureChanged = (self.menuEnableSignature ~= signature)
-    local item
-    local field
-    local enabled
-
-    if type(items) ~= "table" then
-        self.menuEnableSignature = signature
-        return
-    end
-
-    if signatureChanged ~= true and self.pendingFocusRestore ~= true then
-        return
-    end
-
-    for _, item in ipairs(items) do
-        if item.kind == "menu" or item.kind == "page" then
-            buttonIndex = buttonIndex + 1
-            field = self.buttonFields[buttonIndex]
-            enabled = self:_itemEnabled(item)
-            if field and field.enable then
-                field:enable(enabled)
-            end
-            if enabled and firstEnabledField == nil and field then
-                firstEnabledField = field
-            end
-            if buttonIndex == selectedIndex then
-                selectedField = field
-                selectedEnabled = enabled == true
-            end
-        end
-    end
-
-    self.menuEnableSignature = signature
-
-    if (signatureChanged or self.pendingFocusRestore == true) and selectedEnabled ~= true and firstEnabledField and firstEnabledField.focus then
-        firstEnabledField:focus()
-        self.pendingFocusRestore = false
-    elseif (signatureChanged or self.pendingFocusRestore == true) and selectedEnabled == true and selectedField and selectedField.focus then
-        selectedField:focus()
-        self.pendingFocusRestore = false
-    end
-end
-
-function App:_refreshSnapshot()
-    return
+    self.menuController:syncButtonStates(self.currentNode, self.currentNodeSource, self.buttonFields or {})
 end
 
 function App:_collectNodeIconPaths(node)
-    local seen = {}
-    local paths = {}
-    local items = node and node.items or {}
-    local i
-    local path
-
-    for i = 1, #items do
-        path = items[i] and items[i].image or nil
-        if type(path) == "string" and path ~= "" and seen[path] ~= true then
-            seen[path] = true
-            paths[#paths + 1] = path
-        end
-    end
-
-    return paths
+    return self.menuController:collectNodeIconPaths(node)
 end
 
 function App:_cancelStartupPreparation()
-    if self.callback and self._startupCallback then
-        self.callback:clear(self._startupCallback)
-    end
-
-    self.startupJob = nil
+    return self.lifecycleController:cancelStartupPreparation()
 end
 
 function App:_cancelDeferredMaintenance()
-    if self.callback and self._maintenanceCallback then
-        self.callback:clear(self._maintenanceCallback)
-    end
-
-    self.maintenanceScheduled = false
-end
-
-function App:_scheduleStartupPreparation()
-    local job = self.startupJob
-
-    if not job or job.scheduled == true or not self.callback then
-        return
-    end
-
-    job.scheduled = true
-    self.callback:now(self._startupCallback, "immediate")
-end
-
-function App:_scheduleDeferredMaintenance()
-    return
-end
-
-function App:_runDeferredMaintenanceStep()
-    return
-end
-
-function App:_runStartupPreparationStep()
-    return
-end
-
-function App:_consumePreparedStartupRoot()
-    return false
+    return self.lifecycleController:cancelDeferredMaintenance()
 end
 
 function App:_startInitialToolLoad()
-    local sensorsTask = self.framework and self.framework.getTask and self.framework:getTask("sensors") or nil
-
-    if sensorsTask and type(sensorsTask.armSensorLostMute) == "function" then
-        sensorsTask:armSensorLostMute(STARTUP_SENSOR_LOST_MUTE)
-    end
-
-    self.startupLoaderStage = 0
-    self:_cancelStartupPreparation()
-    self.startupJob = nil
-    self:_closeNode(self.currentNode)
-    self:setPageDirty(false)
-    self.pathStack = {}
-    self.currentNodeSource = MENU_ROOT_PATH
-    self.currentNode = self:_loadRootNode()
-    self:_afterNodeChanged()
-    self:_invalidateForm()
+    return self.lifecycleController:startInitialToolLoad()
 end
 
 function App:_loadNodeFromSource(source)
@@ -2109,16 +1999,6 @@ function App:_closeNode(node)
     self:_releaseNodeMemory(node)
 end
 
-function App:_openRoot()
-    self:_closeNode(self.currentNode)
-    self:setPageDirty(false)
-    self.pathStack = {}
-    self.currentNodeSource = MENU_ROOT_PATH
-    self.currentNode = self:_loadRootNode()
-    self:_afterNodeChanged()
-    self:_invalidateForm()
-end
-
 function App:_makeLeafNode(item, breadcrumb)
     return {
         title = item.title or item.id or "Page",
@@ -2231,76 +2111,12 @@ function App:_enterItem(index, item)
     end
 
     local breadcrumb = self:_breadcrumbForItem(item)
-    self:_setSelectedIndex(self.currentNodeSource, index)
-    self.pathStack[#self.pathStack + 1] = {
-        source = self.currentNodeSource,
-        breadcrumb = self.currentNode and self.currentNode.breadcrumb or nil
-    }
 
-    if item.kind == "page" and self.showLoader then
-        self:showLoader({
-            kind = "progress",
-            title = item.title or item.id or "Loading",
-            message = "Loading values.",
-            closeWhenIdle = false,
-            focusMenuOnClose = true,
-            modal = true
-        })
-    end
-
-    if item.kind == "menu" and type(item.source) == "string" then
-        self.currentNodeSource = item.source
-        self.currentNode = self:_loadNodeFromSource(item.source)
-        self.currentNode.breadcrumb = breadcrumb
-    elseif item.kind == "page" then
-        self.currentNodeSource = "page:" .. tostring(item.path or item.id or index)
-        self.currentNode = self:_loadPageNode(item, breadcrumb)
-        if type(self.currentNode) == "table" and self.currentNode.showLoaderOnEnter == true and self.showLoader then
-            local opts = {}
-            local key
-
-            for key, value in pairs(self.currentNode.loaderOnEnter or {}) do
-                opts[key] = value
-            end
-            opts.title = opts.title or self.currentNode.baseTitle or self.currentNode.title or item.title or item.id or "Loading"
-            self:updateLoader(opts)
-        elseif self.loader and self.loader.active then
-            self:clearLoader(true)
-        end
-    else
-        self.currentNodeSource = "leaf:" .. tostring(item.id or index)
-        self.currentNode = self:_makeLeafNode(item, breadcrumb)
-    end
-
-    self:setPageDirty(false)
-    if item.kind ~= "menu" then
-        self:_requestAppFocusRestore()
-    end
-    self:_afterNodeChanged()
-    self:_invalidateForm()
+    self.pageHost:enterItem(index, item, breadcrumb)
 end
 
 function App:_goBack()
-    local previous = self.pathStack[#self.pathStack]
-    if not previous then
-        return false
-    end
-
-    self:_closeNode(self.currentNode)
-    self.pathStack[#self.pathStack] = nil
-    self.currentNodeSource = previous.source
-    if previous.source == MENU_ROOT_PATH then
-        self.currentNode = self:_loadRootNode()
-    else
-        self.currentNode = self:_loadNodeFromSource(previous.source)
-        if type(self.currentNode) == "table" then
-            self.currentNode.breadcrumb = previous.breadcrumb
-        end
-    end
-    self:setPageDirty(false)
-    self:_afterNodeChanged()
-    self:_invalidateForm()
-    return true
+    return self.pageHost:goBack()
 end
 
 function App:_headerTitlePos()
@@ -2314,42 +2130,8 @@ function App:_headerTitlePos()
     }
 end
 
-local function normalizeNavButton(value)
-    if type(value) == "table" then
-        return {
-            enabled = value.enabled ~= false,
-            icon = value.icon,
-            text = value.text
-        }
-    end
-
-    return {
-        enabled = value == true,
-        icon = nil,
-        text = nil
-    }
-end
-
 function App:_navButtonsForNode(node)
-    local buttons = node and node.navButtons
-
-    if type(buttons) == "table" then
-        return {
-            menu = normalizeNavButton(buttons.menu),
-            save = normalizeNavButton(buttons.save),
-            reload = normalizeNavButton(buttons.reload),
-            tool = normalizeNavButton(buttons.tool),
-            help = normalizeNavButton(buttons.help)
-        }
-    end
-
-    return {
-        menu = normalizeNavButton(true),
-        save = normalizeNavButton(false),
-        reload = normalizeNavButton(false),
-        tool = normalizeNavButton(false),
-        help = normalizeNavButton(false)
-    }
+    return self.navigationController:buttonsForNode(node)
 end
 
 function App:_requestExit()
@@ -2365,131 +2147,15 @@ function App:_requestExit()
 end
 
 function App:_addNavigationButtons()
-    local metrics = self:_headerMetrics()
-    local y = self:_headerNavY()
-    local xRight = metrics.width - HEADER_RIGHT_GUTTER
-    local atRoot = (#self.pathStack == 0)
-    local navConfig = self:_navButtonsForNode(self.currentNode)
-    local renderDefs = {}
-    local defs = {
-        {
-            key = "menu",
-            text = "Menu",
-            compact = false,
-            visible = navConfig.menu.enabled == true,
-            icon = navConfig.menu.icon,
-            press = function()
-                self:_handleMenuAction()
-            end
-        },
-        {
-            key = "save",
-            text = "Save",
-            compact = false,
-            visible = navConfig.save.enabled == true,
-            icon = navConfig.save.icon,
-            press = function()
-                self:_handleSaveAction()
-            end
-        },
-        {
-            key = "reload",
-            text = "Reload",
-            compact = false,
-            visible = navConfig.reload.enabled == true,
-            icon = navConfig.reload.icon,
-            press = function()
-                self:_handleReloadAction()
-            end
-        },
-        {
-            key = "tool",
-            text = navConfig.tool.text or "*",
-            compact = true,
-            visible = navConfig.tool.enabled == true,
-            icon = navConfig.tool.icon,
-            press = function()
-                self:_handleToolAction()
-            end
-        },
-        {
-            key = "help",
-            text = navConfig.help.text or "?",
-            compact = true,
-            visible = navConfig.help.enabled == true,
-            icon = navConfig.help.icon,
-            press = function()
-                self:_handleHelpAction()
-            end
-        }
-    }
-
-    if self:_collapseNavigation() == true then
-        for i = 1, #defs do
-            if defs[i].visible == true then
-                renderDefs[#renderDefs + 1] = defs[i]
-            end
-        end
-    else
-        renderDefs = defs
-    end
-
-    for i = #renderDefs, 1, -1 do
-        local def = renderDefs[i]
-        local bx
-        local field
-        local width = def.compact == true and metrics.compactW or metrics.buttonW
-
-        bx = xRight - width
-        field = form.addButton(nil, {x = bx, y = y, w = width, h = metrics.buttonH}, {
-            text = def.text,
-            icon = type(def.icon) == "string" and self:_loadMask(def.icon) or nil,
-            options = FONT_S,
-            paint = NOOP_PAINT,
-            press = def.press
-        })
-        if field and field.enable then
-            if def.key == "save" then
-                field:enable(self:_canSaveNode(self.currentNode))
-            else
-                field:enable(def.visible == true)
-            end
-        end
-        self.navFields[def.key] = field
-        xRight = bx - 5
-    end
+    return self.navigationController:addNavigationButtons()
 end
 
 function App:_addHeader(node)
-    local line = form.addLine("")
-    local headerTitle = node.title or "Rotorflight"
-    if self.currentNodeSource == MENU_ROOT_PATH then
-        headerTitle = node.headerTitle or headerTitle
-    end
-    if type(headerTitle) == "string" and headerTitle ~= "" then
-        self.headerTitleField = form.addStaticText(line, self:_headerTitlePos(), headerTitle)
-    end
-    self:_addNavigationButtons()
+    return self.navigationController:addHeader(node, MENU_ROOT_PATH)
 end
 
 function App:setHeaderTitle(title)
-    local headerTitle = tostring(title or "")
-    local node = self.currentNode
-    local ok = false
-
-    if type(node) == "table" then
-        if self.currentNodeSource == MENU_ROOT_PATH then
-            node.headerTitle = headerTitle
-        else
-            node.title = headerTitle
-        end
-    end
-
-    if self.headerTitleField and self.headerTitleField.value then
-        ok = pcall(self.headerTitleField.value, self.headerTitleField, headerTitle)
-    end
-
-    return true
+    return self.navigationController:setHeaderTitle(title, MENU_ROOT_PATH)
 end
 
 function App:_valuePos()
@@ -2604,69 +2270,21 @@ function App:_buildGridButtons(items)
 end
 
 function App:_buildNodeForm()
-    local node = self.currentNode or self:_loadRootNode()
-    local built
-    local hasCustomBuilder
-    local iconPaths
-    local index
-
-    if self:_nodeHasMenuItems(node) == true then
-        iconPaths = self:_collectNodeIconPaths(node)
-        for index = 1, #iconPaths do
-            self:_loadMask(iconPaths[index])
-        end
-    end
-
-    safeFormClear()
-    self:_clearFormRefs()
-    self.formBuildCount = (self.formBuildCount or 0) + 1
-
-    self:_addHeader(node)
-    built, hasCustomBuilder = self:_runNodeHook(node, "buildForm")
-    if hasCustomBuilder then
-        if built == false then
-            self:_addStaticLine("Error", "Page builder failed")
-        end
-        self:_syncSaveButtonState()
-        if self.pendingFocusRestore == true then
-            self:_restoreAppFocus()
-        end
-        return
-    end
-
-    self:_buildGridButtons(node.items or {})
-    if self:_nodeHasMenuItems(node) == true then
-        self.menuEnableSignature = self:_currentMenuEnableSignature()
-        self.pendingFocusRestore = false
-    end
-    self:_syncSaveButtonState()
-    if self.pendingFocusRestore == true then
-        self:_restoreAppFocus()
-    end
+    return self.formHost:build(self.currentNode or self:_loadRootNode())
 end
 
 function App:_rebuildFormIfNeeded()
-    if self.formDirty ~= true then
-        return
-    end
-    self.formDirty = false
-    self:_buildNodeForm()
+    return self.formHost:rebuildIfNeeded(self.currentNode or self:_loadRootNode())
 end
 
 function App:_updateValueFields()
-    for _, entry in ipairs(self.valueFields) do
-        if entry.field and entry.field.value then
-            entry.field:value(self:_resolveItemValue(entry.item))
-        end
-    end
+    return self.formHost:updateValueFields()
 end
 
 function App:wakeup()
     if self.callback then
         self.callback:wakeup(APP_CALLBACK_WAKEUP_OPTIONS)
     end
-
-    self:_refreshSnapshot()
 
     if self.pendingDialogAction and self:_modalUiActive() ~= true and self.pendingDialogActionReady ~= true then
         self.pendingDialogActionReady = true
@@ -2680,11 +2298,7 @@ function App:wakeup()
     end
 
     if self.currentNode == nil then
-        self.currentNodeSource = MENU_ROOT_PATH
-        self.currentNode = self:_loadRootNode()
-        self.pathStack = {}
-        self:_afterNodeChanged()
-        self:_invalidateForm()
+        self.pageHost:ensureCurrentNode()
     end
 
     if self:_nodeHasMenuItems(self.currentNode) == true then
@@ -2723,58 +2337,7 @@ function App:paint()
 end
 
 function App:event(category, value, x, y)
-    local _ = x
-    _ = y
-
-    if isRotaryNavigationEvent(value) == true then
-        self.pendingFocusRestore = false
-    end
-
-    if (self.modalDialogDepth or 0) > 0 then
-        return false
-    end
-
-    if isMenuKeyEvent(value) ~= true then
-        self.returnMenuArmed = false
-    end
-
-    if isExitLongEvent(value) then
-        suppressFollowupKeyEvent(value)
-        return self:_requestExit()
-    end
-    if isMenuKeyEvent(value) then
-        if self.returnMenuArmed == true then
-            self.returnMenuArmed = false
-            return self:_handleMenuAction()
-        end
-        if self:_focusNavigationButton("menu") == true then
-            self.returnMenuArmed = true
-            suppressFollowupKeyEvent(value)
-            return true
-        end
-        return self:_handleMenuAction()
-    end
-    if isCloseEvent(category, value) then
-        return self:_handleMenuAction()
-    end
-    if isSaveKeyEvent(value) then
-        if self.loader and self.loader.active and self.loader.active.modal == true then
-            suppressFollowupKeyEvent(value)
-            return true
-        end
-        if self:_navButtonsForNode(self.currentNode).save.enabled == true then
-            self:_handleSaveAction()
-        end
-        suppressFollowupKeyEvent(value)
-        return true
-    end
-    if self.loader and self.loader.active and self.loader.active.modal == true then
-        return true
-    end
-    if self:_runNodeHook(self.currentNode, "event", category, value, x, y) == true then
-        return true
-    end
-    return false
+    return self.eventsController:route(category, value, x, y)
 end
 
 function App:onActivate()
@@ -2783,19 +2346,7 @@ function App:onActivate()
     self.pendingDialogAction = nil
     self.pendingDialogActionReady = false
     self.modalDialogDepth = 0
-    if self.loader.active then
-        self:_closeLoaderDialog(self.loader.active.handle)
-    end
-    self.loader.active = nil
-    self.loader.status = nil
-    self.loader.signature = nil
-    self.menuAccessSignature = self:_currentMenuAccessSignature()
-    self.menuEnableSignature = self:_currentMenuEnableSignature()
-    self.startupLoaderStage = 0
-    self:_cancelStartupPreparation()
-    self:_cancelDeferredMaintenance()
-    self.maintenancePhase = 0
-    self:_startInitialToolLoad()
+    self.lifecycleController:activate()
 end
 
 function App:onDeactivate()
@@ -2806,29 +2357,7 @@ function App:onDeactivate()
     self.pendingDialogAction = nil
     self.pendingDialogActionReady = false
     self.modalDialogDepth = 0
-    if self.loader.active then
-        self:_closeLoaderDialog(self.loader.active.handle)
-    end
-    self.loader.active = nil
-    self.loader.status = nil
-    self.loader.signature = nil
-    self.startupLoaderStage = 0
-    self:_cancelStartupPreparation()
-    self:_cancelDeferredMaintenance()
-    self.maintenancePhase = 0
-    if self.callback then
-        self.callback:clearAll()
-    end
-    self:_closeNode(self.currentNode)
-    safeFormClear()
-    self:_clearFormRefs()
-    self.currentNode = nil
-    self.pathStack = {}
-    self.maskCache = {}
-    self.maskCacheOrder = {}
-    clearAppModuleCaches()
-    self:_savePreferences()
-    pcall(collectgarbage, "collect")
+    self.lifecycleController:deactivate()
 end
 
 function App:close()
@@ -2839,33 +2368,17 @@ function App:close()
     self.pendingDialogAction = nil
     self.pendingDialogActionReady = false
     self.modalDialogDepth = 0
-    if self.loader.active then
-        self:_closeLoaderDialog(self.loader.active.handle)
-    end
-    self.loader.active = nil
-    self.loader.status = nil
-    self.loader.signature = nil
-    self.startupLoaderStage = 0
-    self:_cancelStartupPreparation()
-    self:_cancelDeferredMaintenance()
-    if self.callback then
-        self.callback:clearAll()
-    end
-    self:_closeNode(self.currentNode)
-    safeFormClear()
-    self:_clearFormRefs()
-    self.currentNode = nil
-    self.pathStack = nil
-    self.snapshot = nil
-    self.telemetryTask = nil
-    self.maskCache = nil
-    self.maskCacheOrder = nil
+    self.lifecycleController:close()
     self.callback = nil
-    self._maintenanceCallback = nil
-    clearAppModuleCaches()
-    self:_savePreferences()
-    self.framework = nil
-    collectgarbage("collect")
+    self.formHost = nil
+    self.navigationController = nil
+    self.actionsController = nil
+    self.eventsController = nil
+    self.lifecycleController = nil
+    self.loaderController = nil
+    self.menuController = nil
+    self.pageHost = nil
+    self.shared = nil
 end
 
 return App
