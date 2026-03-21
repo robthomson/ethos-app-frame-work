@@ -271,7 +271,33 @@ function App:_invalidateForm()
 end
 
 function App:_menuState()
-    return self.framework.preferences:section("menu_state", {})
+    local prefs = self.framework and self.framework.preferences
+    local state
+    local legacy
+    local key
+
+    if not prefs or not prefs.section then
+        return {}
+    end
+
+    state = prefs:section("menulastselected", {})
+    legacy = prefs:section("menu_state", {})
+
+    for key, value in pairs(legacy or {}) do
+        if state[key] == nil then
+            state[key] = value
+        end
+    end
+
+    return state
+end
+
+function App:_selectedIndexKey(source)
+    if source == MENU_ROOT_PATH then
+        return "mainmenu"
+    end
+
+    return "sel_" .. normalizeNodeKey(source)
 end
 
 function App:_generalPrefs()
@@ -310,7 +336,13 @@ end
 
 function App:_getSelectedIndex(source)
     local state = self:_menuState()
-    local value = tonumber(state["sel_" .. normalizeNodeKey(source)])
+    local key = self:_selectedIndexKey(source)
+    local value = tonumber(state[key])
+
+    if value == nil and source == MENU_ROOT_PATH then
+        value = tonumber(state["sel_" .. normalizeNodeKey(source)])
+    end
+
     if value == nil or value < 1 then
         return 1
     end
@@ -319,7 +351,24 @@ end
 
 function App:_setSelectedIndex(source, index)
     local state = self:_menuState()
-    state["sel_" .. normalizeNodeKey(source)] = tonumber(index) or 1
+    local value = tonumber(index) or 1
+    local key = self:_selectedIndexKey(source)
+
+    state[key] = value
+
+    if source == MENU_ROOT_PATH then
+        state["sel_" .. normalizeNodeKey(source)] = value
+    end
+end
+
+function App:_savePreferences()
+    if not (self.framework and self.framework.preferences and self.framework.preferences.save) then
+        return false
+    end
+
+    return pcall(function()
+        self.framework.preferences:save()
+    end)
 end
 
 function App:_windowSize()
@@ -1196,6 +1245,7 @@ function App:_refreshLoaderState()
     local progressValue
     local mult
     local focusMenuOnClose = false
+    local restoreFocusOnClose = false
 
     if active then
         mult = active.speed or 1.0
@@ -1210,6 +1260,7 @@ function App:_refreshLoaderState()
         end
         if active.pendingClose == true and now >= (active.minVisibleUntil or 0) then
             focusMenuOnClose = active.focusMenuOnClose == true
+            restoreFocusOnClose = active.restoreFocusOnClose == true
             self:_closeLoaderDialog(active.handle)
             self.loader.active = nil
             active = nil
@@ -1219,6 +1270,7 @@ function App:_refreshLoaderState()
             and now >= (active.minVisibleUntil or 0)
             and (active.progressCounter or 0) >= 100 then
             focusMenuOnClose = active.focusMenuOnClose == true
+            restoreFocusOnClose = active.restoreFocusOnClose == true
             self:_closeLoaderDialog(active.handle)
             self.loader.active = nil
             active = nil
@@ -1230,6 +1282,7 @@ function App:_refreshLoaderState()
             and now >= (active.minVisibleUntil or 0)
             and self:_loaderBusyState() ~= true
             and now >= (active.fallbackCloseAt or 0) then
+            restoreFocusOnClose = active.restoreFocusOnClose == true
             self:_closeLoaderDialog(active.handle)
             self.loader.active = nil
             active = nil
@@ -1246,6 +1299,13 @@ function App:_refreshLoaderState()
             else
                 self.pendingFocusRestore = false
                 self:_focusNavigationButton("menu")
+            end
+        elseif restoreFocusOnClose == true then
+            if self:_modalUiActive() == true then
+                self.pendingFocusRestore = true
+            else
+                self.pendingFocusRestore = true
+                self:_restoreAppFocus()
             end
         end
     end
@@ -1264,31 +1324,13 @@ function App:_loaderSpeed(speed)
 end
 
 function App:_showMenuNavigationLoader(title, detail, speed)
-    local resolvedSpeed = speed
-
-    if type(resolvedSpeed) == "number" and resolvedSpeed < 1.0 then
-        resolvedSpeed = "FAST"
-    end
-
-    self:showLoader({
-        kind = "menu",
-        title = self:_loaderText(title, "Menu"),
-        message = "Opening menu.",
-        detail = self:_loaderText(detail, ""),
-        closeWhenIdle = false,
-        minVisibleFor = 0.08,
-        fallbackCloseAfter = 0.60,
-        watchdog = false,
-        speed = resolvedSpeed or "FAST"
-    })
+    local _ = title
+    _ = detail
+    _ = speed
 end
 
 function App:_clearMenuNavigationLoader()
-    local active = self.loader and self.loader.active or nil
-
-    if active and active.kind == "menu" and self.formDirty ~= true then
-        self:clearLoader()
-    end
+    return
 end
 
 function App:showLoader(options)
@@ -1315,6 +1357,7 @@ function App:showLoader(options)
         pendingClose = false,
         closeRequested = false,
         focusMenuOnClose = opts.focusMenuOnClose == true,
+        restoreFocusOnClose = opts.restoreFocusOnClose == true,
         timedOut = false,
         debug = opts.debug ~= false,
         progressCounter = 0,
@@ -1377,6 +1420,7 @@ function App:clearLoader(force)
     local active = self.loader.active
     local now = os.clock()
     local focusMenuOnClose = false
+    local restoreFocusOnClose = false
 
     if active == nil then
         self:_refreshLoaderState()
@@ -1385,6 +1429,7 @@ function App:clearLoader(force)
 
     if force == true or now >= (active.minVisibleUntil or 0) then
         focusMenuOnClose = active.focusMenuOnClose == true
+        restoreFocusOnClose = active.restoreFocusOnClose == true
         self:_closeLoaderDialog(active.handle)
         self.loader.active = nil
     else
@@ -1399,6 +1444,13 @@ function App:clearLoader(force)
             else
                 self.pendingFocusRestore = false
                 self:_focusNavigationButton("menu")
+            end
+        elseif restoreFocusOnClose == true then
+            if self:_modalUiActive() == true then
+                self.pendingFocusRestore = true
+            else
+                self.pendingFocusRestore = true
+                self:_restoreAppFocus()
             end
         end
     end
@@ -1614,6 +1666,25 @@ function App:_itemEnabled(item)
     return type(item) == "table" and item.disabled ~= true
 end
 
+function App:_nodeHasMenuItems(node)
+    local items = node and node.items or nil
+    local index
+    local item
+
+    if type(items) ~= "table" then
+        return false
+    end
+
+    for index = 1, #items do
+        item = items[index]
+        if item and (item.kind == "menu" or item.kind == "page") then
+            return true
+        end
+    end
+
+    return false
+end
+
 function App:_currentMenuAccessSignature()
     local visibility = loadMenuVisibilityModule()
 
@@ -1686,6 +1757,10 @@ function App:_syncMenuButtonStates()
 
     if type(items) ~= "table" then
         self.menuEnableSignature = signature
+        return
+    end
+
+    if signatureChanged ~= true and self.pendingFocusRestore ~= true then
         return
     end
 
@@ -1768,106 +1843,19 @@ function App:_scheduleStartupPreparation()
 end
 
 function App:_scheduleDeferredMaintenance()
-    if not self.callback or self.maintenanceScheduled == true or self.startupLoaderStage == 1 then
-        return
-    end
-
-    self.maintenanceScheduled = true
-    self.callback:now(self._maintenanceCallback, "immediate")
+    return
 end
 
 function App:_runDeferredMaintenanceStep()
-    local phase = self.maintenancePhase or 0
-
-    self.maintenanceScheduled = false
-
-    if self.startupLoaderStage == 1 or not self.framework then
-        return
-    end
-
-    if phase == 0 then
-        self:_refreshMenuAccess()
-        if self.currentNode == nil then
-            self.currentNode = self:_loadRootNode()
-        end
-    elseif phase == 1 then
-        self:_rebuildFormIfNeeded()
-        self:_syncMenuButtonStates()
-    else
-        self:_runNodeHook(self.currentNode, "wakeup")
-        self:_updateValueFields()
-        self:_clearMenuNavigationLoader()
-        if self.startupLoaderStage == 2 and self.currentNodeSource == MENU_ROOT_PATH and self.formDirty ~= true then
-            self.startupLoaderStage = 0
-            self:clearLoader()
-        end
-    end
-
-    self.maintenancePhase = (phase + 1) % APP_MAINTENANCE_PHASES
+    return
 end
 
 function App:_runStartupPreparationStep()
-    local job = self.startupJob
-    local endIndex
-    local i
-    local loaded
-
-    if not job or self.startupLoaderStage ~= 1 or not self.framework then
-        return
-    end
-
-    job.scheduled = false
-
-    if job.phase == "load_root" then
-        job.node = self:_loadRootNode()
-        job.iconPaths = self:_collectNodeIconPaths(job.node)
-        job.totalIcons = #job.iconPaths
-        job.nextIconIndex = 1
-
-        if job.totalIcons > 0 then
-            job.phase = "preload_icons"
-            self:updateLoader({detail = string.format("Caching icons 0/%d.", job.totalIcons)})
-        else
-            job.phase = "ready"
-            job.ready = true
-            self:updateLoader({detail = "Finishing menu."})
-        end
-    elseif job.phase == "preload_icons" then
-        endIndex = math.min(job.nextIconIndex + STARTUP_ICON_BATCH - 1, job.totalIcons)
-        for i = job.nextIconIndex, endIndex do
-            self:_loadMask(job.iconPaths[i])
-        end
-        job.nextIconIndex = endIndex + 1
-        loaded = math.min(endIndex, job.totalIcons)
-        self:updateLoader({detail = string.format("Caching icons %d/%d.", loaded, job.totalIcons)})
-
-        if job.nextIconIndex > job.totalIcons then
-            job.phase = "ready"
-            job.ready = true
-            self:updateLoader({detail = "Finishing menu."})
-        end
-    end
-
-    if job.ready ~= true then
-        self:_scheduleStartupPreparation()
-    end
+    return
 end
 
 function App:_consumePreparedStartupRoot()
-    local job = self.startupJob
-
-    if not job or job.ready ~= true or type(job.node) ~= "table" then
-        return false
-    end
-
-    self.currentNodeSource = MENU_ROOT_PATH
-    self.currentNode = job.node
-    self.pathStack = {}
-    self:setPageDirty(false)
-    self:_afterNodeChanged()
-    self:_invalidateForm()
-    self.startupJob = nil
-    return true
+    return false
 end
 
 function App:_startInitialToolLoad()
@@ -1877,27 +1865,16 @@ function App:_startInitialToolLoad()
         sensorsTask:armSensorLostMute(STARTUP_SENSOR_LOST_MUTE)
     end
 
-    self.startupLoaderStage = 1
+    self.startupLoaderStage = 0
     self:_cancelStartupPreparation()
-    self.startupJob = {
-        phase = "load_root",
-        scheduled = false,
-        ready = false,
-        node = nil,
-        iconPaths = nil,
-        totalIcons = 0,
-        nextIconIndex = 1
-    }
-    self:showLoader({
-        kind = "progress",
-        title = "Loading",
-        message = "Opening main menu.",
-        debug = false,
-        modal = true,
-        closeWhenIdle = false,
-        minVisibleFor = STARTUP_LOADER_MIN_VISIBLE
-    })
-    self:_scheduleStartupPreparation()
+    self.startupJob = nil
+    self:_closeNode(self.currentNode)
+    self:setPageDirty(false)
+    self.pathStack = {}
+    self.currentNodeSource = MENU_ROOT_PATH
+    self.currentNode = self:_loadRootNode()
+    self:_afterNodeChanged()
+    self:_invalidateForm()
 end
 
 function App:_loadNodeFromSource(source)
@@ -1999,7 +1976,6 @@ function App:_closeNode(node)
 end
 
 function App:_openRoot()
-    self:_showMenuNavigationLoader("Configuration", "Opening main menu.")
     self:_closeNode(self.currentNode)
     self:setPageDirty(false)
     self.pathStack = {}
@@ -2121,8 +2097,6 @@ function App:_enterItem(index, item)
     end
 
     local breadcrumb = self:_breadcrumbForItem(item)
-    self:_showMenuNavigationLoader(item.title or item.id or "Menu", item.subtitle or breadcrumb, item.loaderSpeed)
-
     self:_setSelectedIndex(self.currentNodeSource, index)
     self.pathStack[#self.pathStack + 1] = {
         source = self.currentNodeSource,
@@ -2142,7 +2116,9 @@ function App:_enterItem(index, item)
     end
 
     self:setPageDirty(false)
-    self:_requestAppFocusRestore()
+    if item.kind ~= "menu" then
+        self:_requestAppFocusRestore()
+    end
     self:_afterNodeChanged()
     self:_invalidateForm()
 end
@@ -2152,8 +2128,6 @@ function App:_goBack()
     if not previous then
         return false
     end
-
-    self:_showMenuNavigationLoader("Back", previous.breadcrumb)
 
     self:_closeNode(self.currentNode)
     self.pathStack[#self.pathStack] = nil
@@ -2167,7 +2141,6 @@ function App:_goBack()
         end
     end
     self:setPageDirty(false)
-    self:_requestAppFocusRestore()
     self:_afterNodeChanged()
     self:_invalidateForm()
     return true
@@ -2389,6 +2362,11 @@ function App:_buildGridButtons(items)
     local y = 0
     local activeGroup = nil
     local buttonIndex = 0
+    local rememberedIndex = self:_getSelectedIndex(self.currentNodeSource)
+    local firstEnabledField = nil
+    local selectedField = nil
+    local selectedEnabled = false
+    local focused = false
 
     for _, item in ipairs(items) do
         if item.kind == "menu" or item.kind == "page" then
@@ -2427,6 +2405,27 @@ function App:_buildGridButtons(items)
 
             self.buttonFields[selectedIndex] = field
 
+            if field and field.enable then
+                field:enable(self:_itemEnabled(selectedItem))
+            end
+
+            if self:_itemEnabled(selectedItem) == true then
+                if firstEnabledField == nil then
+                    firstEnabledField = field
+                end
+                if selectedIndex == rememberedIndex then
+                    selectedField = field
+                    selectedEnabled = true
+                    if focused ~= true and field and field.focus then
+                        pcall(field.focus, field)
+                        focused = true
+                    end
+                end
+            elseif selectedIndex == rememberedIndex then
+                selectedField = field
+                selectedEnabled = false
+            end
+
             lc = lc + 1
             if lc == metrics.numPerRow then
                 lc = 0
@@ -2435,6 +2434,14 @@ function App:_buildGridButtons(items)
             local line = form.addLine(item.title or item.id or "Value")
             local field = form.addStaticText(line, self:_valuePos(), self:_resolveItemValue(item))
             self.valueFields[#self.valueFields + 1] = {item = item, field = field}
+        end
+    end
+
+    if focused ~= true then
+        if selectedEnabled == true and selectedField and selectedField.focus then
+            pcall(selectedField.focus, selectedField)
+        elseif firstEnabledField and firstEnabledField.focus then
+            pcall(firstEnabledField.focus, firstEnabledField)
         end
     end
 end
@@ -2502,15 +2509,23 @@ function App:wakeup()
         self.pendingDialogActionReady = false
     end
 
-    if self.startupLoaderStage == 1 then
-        if self.currentNode == nil and self:_consumePreparedStartupRoot() ~= true then
-            self:_refreshLoaderState()
-            return
-        end
-        self.startupLoaderStage = 2
+    if self.currentNode == nil then
+        self.currentNodeSource = MENU_ROOT_PATH
+        self.currentNode = self:_loadRootNode()
+        self.pathStack = {}
+        self:_afterNodeChanged()
+        self:_invalidateForm()
     end
 
-    self:_scheduleDeferredMaintenance()
+    if self:_nodeHasMenuItems(self.currentNode) == true then
+        self:_refreshMenuAccess()
+    end
+    self:_rebuildFormIfNeeded()
+    if self:_nodeHasMenuItems(self.currentNode) == true then
+        self:_syncMenuButtonStates()
+    end
+    self:_runNodeHook(self.currentNode, "wakeup")
+    self:_updateValueFields()
     self:_refreshLoaderState()
 end
 
@@ -2641,6 +2656,7 @@ function App:onDeactivate()
     self.pathStack = {}
     self.maskCache = {}
     self.maskCacheOrder = {}
+    self:_savePreferences()
     pcall(collectgarbage, "collect")
 end
 
@@ -2675,9 +2691,7 @@ function App:close()
     self.maskCacheOrder = nil
     self.callback = nil
     self._maintenanceCallback = nil
-    pcall(function()
-        self.framework.preferences:save()
-    end)
+    self:_savePreferences()
     self.framework = nil
     collectgarbage("collect")
 end
