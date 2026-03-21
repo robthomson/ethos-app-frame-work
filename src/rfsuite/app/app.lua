@@ -9,7 +9,7 @@ local callbackFactory = require("framework.core.callback")
 local AudioLib = require("lib.audio")
 
 local MENU_ROOT_PATH = "app/menu/root.lua"
-local MASK_CACHE_MAX = 96
+local MASK_CACHE_MAX = 32
 local NOOP_PAINT = function() end
 local HEADER_NAV_HEIGHT_REDUCTION = 4
 local HEADER_NAV_Y_SHIFT = 6
@@ -41,6 +41,25 @@ local APP_RENDER_CALLBACK_WAKEUP_OPTIONS = {
 local APP_MAINTENANCE_PHASES = 3
 local SHORTCUTS_MODULE_CACHE = nil
 local MENU_VISIBILITY_MODULE_CACHE = nil
+
+local function unloadModuleIfLoaded(name)
+    if type(name) ~= "string" or name == "" then
+        return
+    end
+    if package and type(package.loaded) == "table" then
+        package.loaded[name] = nil
+    end
+end
+
+local function clearAppModuleCaches()
+    SHORTCUTS_MODULE_CACHE = nil
+    MENU_VISIBILITY_MODULE_CACHE = nil
+
+    unloadModuleIfLoaded("app.lib.shortcuts")
+    unloadModuleIfLoaded("app.lib.menu_visibility")
+    unloadModuleIfLoaded("app.lib.msp_page")
+    unloadModuleIfLoaded("app.lib.prefs_page")
+end
 
 local function loadLuaTable(path)
     if type(path) ~= "string" or path == "" then
@@ -2061,8 +2080,33 @@ function App:_loadRootNode()
     return node
 end
 
+function App:_releaseNodeMemory(node)
+    if type(node) ~= "table" then
+        return
+    end
+
+    node.app = nil
+    node.framework = nil
+    node.items = nil
+    node.state = nil
+    node.loaderOnEnter = nil
+    node.navButtons = nil
+    node.buildForm = nil
+    node.wakeup = nil
+    node.paint = nil
+    node.event = nil
+    node.save = nil
+    node.reload = nil
+    node.menu = nil
+    node.tool = nil
+    node.help = nil
+    node.canSave = nil
+    node.close = nil
+end
+
 function App:_closeNode(node)
     self:_runNodeHook(node, "close")
+    self:_releaseNodeMemory(node)
 end
 
 function App:_openRoot()
@@ -2782,6 +2826,7 @@ function App:onDeactivate()
     self.pathStack = {}
     self.maskCache = {}
     self.maskCacheOrder = {}
+    clearAppModuleCaches()
     self:_savePreferences()
     pcall(collectgarbage, "collect")
 end
@@ -2817,6 +2862,7 @@ function App:close()
     self.maskCacheOrder = nil
     self.callback = nil
     self._maintenanceCallback = nil
+    clearAppModuleCaches()
     self:_savePreferences()
     self.framework = nil
     collectgarbage("collect")
