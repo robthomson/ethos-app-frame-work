@@ -2089,6 +2089,17 @@ function App:_enterItem(index, item)
         breadcrumb = self.currentNode and self.currentNode.breadcrumb or nil
     }
 
+    if item.kind == "page" and self.showLoader then
+        self:showLoader({
+            kind = "progress",
+            title = item.title or item.id or "Loading",
+            message = "Loading values.",
+            closeWhenIdle = false,
+            focusMenuOnClose = true,
+            modal = true
+        })
+    end
+
     if item.kind == "menu" and type(item.source) == "string" then
         self.currentNodeSource = item.source
         self.currentNode = self:_loadNodeFromSource(item.source)
@@ -2096,6 +2107,18 @@ function App:_enterItem(index, item)
     elseif item.kind == "page" then
         self.currentNodeSource = "page:" .. tostring(item.path or item.id or index)
         self.currentNode = self:_loadPageNode(item, breadcrumb)
+        if type(self.currentNode) == "table" and self.currentNode.showLoaderOnEnter == true and self.showLoader then
+            local opts = {}
+            local key
+
+            for key, value in pairs(self.currentNode.loaderOnEnter or {}) do
+                opts[key] = value
+            end
+            opts.title = opts.title or self.currentNode.baseTitle or self.currentNode.title or item.title or item.id or "Loading"
+            self:updateLoader(opts)
+        elseif self.loader and self.loader.active then
+            self:clearLoader(true)
+        end
     else
         self.currentNodeSource = "leaf:" .. tostring(item.id or index)
         self.currentNode = self:_makeLeafNode(item, breadcrumb)

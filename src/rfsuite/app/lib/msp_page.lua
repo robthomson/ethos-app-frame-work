@@ -1434,6 +1434,14 @@ function MspPage.create(spec)
             title = ctx.item.title or spec.title or "MSP Page",
             subtitle = ctx.item.subtitle or spec.subtitle or "MSP-backed settings",
             breadcrumb = ctx.breadcrumb,
+            showLoaderOnEnter = true,
+            loaderOnEnter = {
+                kind = "progress",
+                message = "Loading values.",
+                closeWhenIdle = false,
+                focusMenuOnClose = true,
+                modal = true
+            },
             navButtons = {
                 menu = DEFAULT_NAV.menu,
                 save = DEFAULT_NAV.save,
