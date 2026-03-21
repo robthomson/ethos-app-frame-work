@@ -4,7 +4,6 @@
 ]] --
 
 local utils = require("lib.utils")
-local log = require("framework.utils.log")
 
 local MspPage = {}
 
@@ -1618,11 +1617,8 @@ function MspPage.create(spec)
             local err
 
             if not self:canSave() then
-                log:info("[msp-page-save] canSave false")
                 return false
             end
-
-            log:info("[msp-page-save] start")
 
             ok, err = ensureApis(self)
             if not ok then

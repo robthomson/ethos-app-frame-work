@@ -7,7 +7,6 @@ local App = {}
 local ethos_events = require("framework.utils.ethos_events")
 local callbackFactory = require("framework.core.callback")
 local AudioLib = require("lib.audio")
-local log = require("framework.utils.log")
 
 local MENU_ROOT_PATH = "app/menu/root.lua"
 local MASK_CACHE_MAX = 16
@@ -758,13 +757,10 @@ function App:_handleSaveAction()
     end
 
     local function runSave()
-        log:info("[save-confirm] runSave")
         result = self:_runNodeHook(self.currentNode, "save")
         if result == false then
-            log:info("[save-confirm] runSave result false")
             return false
         end
-        log:info("[save-confirm] runSave result true")
         self:setPageDirty(false)
         return true
     end
@@ -2503,13 +2499,11 @@ function App:wakeup()
     self:_refreshSnapshot()
 
     if self.pendingDialogAction and self:_modalUiActive() ~= true and self.pendingDialogActionReady ~= true then
-        log:info("[save-confirm] action ready")
         self.pendingDialogActionReady = true
     elseif self.pendingDialogAction and self:_modalUiActive() ~= true then
         local pendingAction = self.pendingDialogAction
         self.pendingDialogAction = nil
         self.pendingDialogActionReady = false
-        log:info("[save-confirm] running action")
         pendingAction()
     elseif self:_modalUiActive() == true then
         self.pendingDialogActionReady = false
