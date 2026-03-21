@@ -71,6 +71,24 @@ function api.get(name)
     return api.load(name)
 end
 
+function api.unload(name)
+    if not name or name == "" then
+        return false
+    end
+
+    api.loaded[name] = nil
+    api.apidata.positionmap[name] = nil
+    api.apidata.receivedBytes[name] = nil
+    api.apidata.receivedBytesCount[name] = nil
+    api.apidata.lastRead[name] = nil
+    api.apidata.lastWrite[name] = nil
+    api.apidata._lastReadMode[name] = nil
+    api.apidata._lastWriteMode[name] = nil
+    package.loaded["mspapi.definitions." .. tostring(name)] = nil
+
+    return true
+end
+
 function api.clear()
     api.loaded = {}
     api.apidata = {

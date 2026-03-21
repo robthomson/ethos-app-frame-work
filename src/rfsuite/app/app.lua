@@ -183,12 +183,32 @@ local function shouldCloneLoadedTable(path)
     return type(path) == "string" and path:sub(1, 9) == "app/menu/"
 end
 
+local function shouldCacheLoadedTable(path)
+    if type(path) ~= "string" or path == "" then
+        return false
+    end
+
+    if path:sub(1, 12) == "app/modules/" then
+        return false
+    end
+
+    return true
+end
+
+local function clearLuaTableEntry(path)
+    if type(path) ~= "string" or path == "" then
+        return
+    end
+
+    LUA_TABLE_CACHE[path] = nil
+end
+
 local function loadLuaTable(path)
     if type(path) ~= "string" or path == "" then
         return nil, "invalid path"
     end
 
-    if LUA_TABLE_CACHE[path] ~= nil then
+    if shouldCacheLoadedTable(path) and LUA_TABLE_CACHE[path] ~= nil then
         if shouldCloneLoadedTable(path) then
             return cloneTable(LUA_TABLE_CACHE[path])
         end
@@ -209,7 +229,9 @@ local function loadLuaTable(path)
         return nil, "module did not return table"
     end
 
-    LUA_TABLE_CACHE[path] = value
+    if shouldCacheLoadedTable(path) then
+        LUA_TABLE_CACHE[path] = value
+    end
 
     if shouldCloneLoadedTable(path) then
         return cloneTable(value)
@@ -1697,6 +1719,9 @@ end
 
 function App:_closeNode(node)
     self:_runNodeHook(node, "close")
+    if type(node) == "table" and type(node.__modulePath) == "string" and node.__modulePath ~= "" then
+        clearLuaTableEntry(node.__modulePath)
+    end
     self:_releaseNodeMemory(node)
 end
 
@@ -1793,6 +1818,7 @@ function App:_loadPageNode(item, breadcrumb)
     if type(node.navButtons) ~= "table" then
         node.navButtons = {menu = true, save = false, reload = false, tool = false, help = false}
     end
+    node.__modulePath = modulePath
     if self:_shouldManageDirtySave(node) and type(node.canSave) ~= "function" then
         node.canSave = function()
             return self.pageDirty == true

@@ -11,6 +11,8 @@ local FIELD_TYPE_CHOICE = 1
 local DEFAULT_INLINE_SIZE = 13.6
 local DEFAULT_NAV = {menu = true, save = true, reload = true, tool = false, help = false}
 local relinkFlexRows
+local function noopHandler()
+end
 
 local function copyTable(source)
     local out = {}
@@ -1726,8 +1728,58 @@ function MspPage.create(spec)
         end
 
         function node:close()
+            local apiEntry
+            local index
+            local mspTask = self.app and self.app.framework and self.app.framework:getTask("msp") or nil
+
             self.state.loading = false
             self.state.saving = false
+            self.state.pendingLoaderClose = false
+            self.state.pendingLoaderCloseBuild = 0
+            self.state.needsInitialLoad = false
+
+            for _, apiEntry in pairs(self.state.apis or {}) do
+                if apiEntry and apiEntry.api then
+                    if apiEntry.api.setCompleteHandler then
+                        apiEntry.api.setCompleteHandler(noopHandler)
+                    end
+                    if apiEntry.api.setErrorHandler then
+                        apiEntry.api.setErrorHandler(noopHandler)
+                    end
+                    if apiEntry.api.clearValues then
+                        apiEntry.api.clearValues()
+                    end
+                    if apiEntry.api.resetWriteStatus then
+                        apiEntry.api.resetWriteStatus()
+                    end
+                    if apiEntry.api.setUUID then
+                        apiEntry.api.setUUID(nil)
+                    end
+                    if apiEntry.api.setTimeout then
+                        apiEntry.api.setTimeout(nil)
+                    end
+                end
+            end
+
+            if mspTask and mspTask.api and mspTask.api.unload then
+                for _, apiEntry in pairs(self.state.apis or {}) do
+                    if apiEntry and apiEntry.spec and apiEntry.spec.name then
+                        mspTask.api.unload(apiEntry.spec.name)
+                    end
+                end
+            end
+
+            for index = 1, #(self.state.fields or {}) do
+                if self.state.fields[index] then
+                    self.state.fields[index].control = nil
+                end
+            end
+
+            self.state.apis = {}
+            self.state.fields = {}
+            self.state.rows = {}
+            self.state.labels = {}
+            self.state.columns = {}
             self.app.ui.clearProgressDialog(true)
         end
 
