@@ -167,10 +167,19 @@ function Page:open(ctx)
         local freshShortcuts = app.framework.preferences:section("shortcuts", {})
         local freshLastSelected = app.framework.preferences:section("menulastselected", {})
 
+        app.ui.showLoader({
+            kind = "progress",
+            title = self.title or "@i18n(app.modules.settings.shortcuts)@",
+            message = "Reloading settings.",
+            closeWhenIdle = false,
+            modal = true
+        })
+
         self.state.config = copyMap(freshShortcuts)
         self.state.mixedIn = prefBool(freshGeneral.shortcuts_mixed_in, true)
         self.state.groupIndex = tonumber(freshLastSelected[GROUP_PREF_KEY]) or 1
         app:_invalidateForm()
+        app.ui.clearProgressDialog(true)
         return true
     end
 
@@ -180,6 +189,14 @@ function Page:open(ctx)
         local selected = SHORTCUTS.limitSelectionMap(self.state.config, maxSelected)
         local key
         local item
+
+        app.ui.showLoader({
+            kind = "save",
+            title = self.title or "@i18n(app.modules.settings.shortcuts)@",
+            message = "Saving settings.",
+            closeWhenIdle = false,
+            modal = true
+        })
 
         generalSection.shortcuts_mixed_in = (self.state.mixedIn == true)
         lastSelected[GROUP_PREF_KEY] = self.state.groupIndex
@@ -195,6 +212,7 @@ function Page:open(ctx)
         end
 
         app.framework.preferences:save()
+        app.ui.clearProgressDialog(true)
         return true
     end
 

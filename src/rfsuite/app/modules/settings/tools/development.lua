@@ -3,7 +3,12 @@
   GPLv3 — https://www.gnu.org/licenses/gpl-3.0.en.html
 ]] --
 
-local Page = {}
+local ok, PrefsPage = pcall(require, "app.lib.prefs_page")
+
+if not ok or type(PrefsPage) ~= "table" then
+    local chunk = assert(loadfile("app/lib/prefs_page.lua"))
+    PrefsPage = chunk()
+end
 
 local LOG_LEVEL_CHOICES = {
     {"Off", 1},
@@ -38,27 +43,6 @@ local function copyTable(source)
     end
 
     return out
-end
-
-local function prefBool(value, default)
-    if value == nil then
-        return default
-    end
-    if value == true or value == "true" or value == 1 or value == "1" then
-        return true
-    end
-    if value == false or value == "false" or value == 0 or value == "0" then
-        return false
-    end
-    return default
-end
-
-local function toNumber(value, default)
-    local n = tonumber(value)
-    if n == nil then
-        return default
-    end
-    return n
 end
 
 local function logLevelIndex(value)
@@ -121,37 +105,6 @@ local function idleGcIntervalValue(index)
     return 0.75
 end
 
-local function addLine(container, label)
-    if container and container.addLine then
-        return container:addLine(label)
-    end
-    return form.addLine(label)
-end
-
-local function addChoice(container, label, choices, getter, setter)
-    return form.addChoiceField(addLine(container, label), nil, choices, getter, setter)
-end
-
-local function addBoolean(container, label, getter, setter)
-    return form.addBooleanField(addLine(container, label), nil, getter, setter)
-end
-
-local function addNumber(container, label, minValue, maxValue, getter, setter, suffix)
-    local field = form.addNumberField(addLine(container, label), nil, minValue, maxValue, getter, setter)
-
-    if field and field.suffix and suffix then
-        field:suffix(suffix)
-    end
-    if field and field.minimum then
-        field:minimum(minValue)
-    end
-    if field and field.maximum then
-        field:maximum(maxValue)
-    end
-
-    return field
-end
-
 local function readState(framework)
     local prefs = framework.preferences:section("developer", {})
     local config = framework.config and framework.config.developer or {}
@@ -210,102 +163,65 @@ local function applyRuntimeSettings(app, state)
     end
 end
 
-function Page:open(ctx)
-    local state = readState(ctx.framework)
-    local node = {
-        title = ctx.item.title or "Development",
-        subtitle = ctx.item.subtitle or "Developer settings",
-        breadcrumb = ctx.breadcrumb,
-        navButtons = {menu = true, save = true, reload = true, tool = false, help = false}
-    }
-
-    local function resetState()
-        local fresh = readState(ctx.framework)
-
-        for key in pairs(state) do
-            state[key] = nil
-        end
-        for key, value in pairs(fresh) do
-            state[key] = value
-        end
-    end
-
-    function node:buildForm(app)
-        addChoice(nil, "Log Level", LOG_LEVEL_CHOICES,
-            function()
-                return logLevelIndex(state.loglevel)
-            end,
-            function(newValue)
-                state.loglevel = logLevelValue(newValue)
-            end)
-
-        addBoolean(nil, "Log MSP Traffic",
-            function()
-                return prefBool(state.logmsp, false)
-            end,
-            function(newValue)
-                state.logmsp = newValue
-            end)
-
-        addBoolean(nil, "Log Events",
-            function()
-                return prefBool(state.logevents, false)
-            end,
-            function(newValue)
-                state.logevents = newValue
-            end)
-
-        addChoice(nil, "Simulation API Version", API_VERSION_CHOICES,
-            function()
-                return toNumber(state.apiversion, 2)
-            end,
-            function(newValue)
-                state.apiversion = newValue
-            end)
-
-        addBoolean(nil, "Memory Stats",
-            function()
-                return prefBool(state.memstats, false)
-            end,
-            function(newValue)
-                state.memstats = newValue
-            end)
-
-        addBoolean(nil, "Task Profiler",
-            function()
-                return prefBool(state.taskprofiler, false)
-            end,
-            function(newValue)
-                state.taskprofiler = newValue
-            end)
-
-        addBoolean(nil, "Enable Idle GC",
-            function()
-                return prefBool(state.idleGcEnabled, true)
-            end,
-            function(newValue)
-                state.idleGcEnabled = newValue
-            end)
-
-        addChoice(nil, "Idle GC Interval", IDLE_GC_INTERVAL_CHOICES,
-            function()
-                return idleGcIntervalIndex(state.idleGcInterval)
-            end,
-            function(newValue)
-                state.idleGcInterval = idleGcIntervalValue(newValue)
-            end)
-
-        addNumber(nil, "Idle GC Step", 1, 256,
-            function()
-                return tonumber(state.idleGcStepK) or 32
-            end,
-            function(newValue)
-                state.idleGcStepK = newValue
-            end,
-            "K")
-    end
-
-    function node:save(app)
+local Page = PrefsPage.create({
+    title = "Development",
+    subtitle = "Developer settings",
+    navButtons = {menu = true, save = true, reload = true, tool = false, help = false},
+    readState = readState,
+    sections = {
+        {
+            title = "Logging",
+            fields = {
+                {
+                    kind = "choice",
+                    label = "Log Level",
+                    key = "loglevel",
+                    choices = LOG_LEVEL_CHOICES,
+                    get = function(state)
+                        return logLevelIndex(state.loglevel)
+                    end,
+                    set = function(state, newValue)
+                        state.loglevel = logLevelValue(newValue)
+                    end
+                },
+                {kind = "boolean", label = "Log MSP Traffic", key = "logmsp", default = false},
+                {kind = "boolean", label = "Log Events", key = "logevents", default = false}
+            }
+        },
+        {
+            title = "Simulation",
+            fields = {
+                {kind = "choice", label = "Simulation API Version", key = "apiversion", choices = API_VERSION_CHOICES, get = function(state) return tonumber(state.apiversion) or 2 end}
+            }
+        },
+        {
+            title = "Profiling",
+            fields = {
+                {kind = "boolean", label = "Memory Stats", key = "memstats", default = false},
+                {kind = "boolean", label = "Task Profiler", key = "taskprofiler", default = false}
+            }
+        },
+        {
+            title = "Garbage Collection",
+            fields = {
+                {kind = "boolean", label = "Enable Idle GC", key = "idleGcEnabled", default = true},
+                {
+                    kind = "choice",
+                    label = "Idle GC Interval",
+                    key = "idleGcInterval",
+                    choices = IDLE_GC_INTERVAL_CHOICES,
+                    get = function(state)
+                        return idleGcIntervalIndex(state.idleGcInterval)
+                    end,
+                    set = function(state, newValue)
+                        state.idleGcInterval = idleGcIntervalValue(newValue)
+                    end
+                },
+                {kind = "number", label = "Idle GC Step", key = "idleGcStepK", min = 1, max = 256, suffix = "K", get = function(state) return tonumber(state.idleGcStepK) or 32 end}
+            }
+        }
+    },
+    save = function(_, app, state)
         local developer = app.framework.preferences:section("developer", {})
         local ok
         local err
@@ -321,17 +237,8 @@ function Page:open(ctx)
         end
 
         applyRuntimeSettings(app, state)
-        app:_invalidateForm()
         return true
     end
-
-    function node:reload(app)
-        resetState()
-        app:_invalidateForm()
-        return true
-    end
-
-    return node
-end
+})
 
 return Page

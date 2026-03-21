@@ -217,7 +217,6 @@ local function beginSave(node)
         state.saving = false
         state.status = "Ready"
         node.app.ui.clearProgressDialog(true)
-        node.app:_invalidateForm()
     end)
     api.setErrorHandler(function(_, reasonText)
         state.saving = false
