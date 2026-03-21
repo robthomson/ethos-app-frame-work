@@ -17,6 +17,7 @@ local SensorsTask = require("tasks.sensors")
 local TimerTask = require("tasks.timer")
 local AudioTask = require("tasks.audio")
 local LoggingTask = require("tasks.logging")
+local AppCleanupTask = require("tasks.app_cleanup")
 
 local runtime = {}
 runtime._backgroundStatusValues = {}
@@ -113,6 +114,9 @@ runtime.config = {
     backgroundWatchdog = {
         staleAfter = 0.75,
         missingAfter = 3.0
+    },
+    app = {
+        idleCleanupDelay = 5.0
     }
 }
 
@@ -179,6 +183,13 @@ local function seedSession(fw)
         backgroundState = fw.session:get("backgroundState", "waiting"),
         backgroundHealthy = fw.session:get("backgroundHealthy", false),
         backgroundAge = fw.session:get("backgroundAge", 0),
+        appResident = fw.session:get("appResident", false),
+        appInactiveAt = fw.session:get("appInactiveAt", 0),
+        appCleanupPending = fw.session:get("appCleanupPending", false),
+        appCleanupDueAt = fw.session:get("appCleanupDueAt", 0),
+        appCleanupLastAt = fw.session:get("appCleanupLastAt", 0),
+        appCleanupRuns = fw.session:get("appCleanupRuns", 0),
+        appCleanupReason = fw.session:get("appCleanupReason", "startup"),
         appWakeups = fw.session:get("appWakeups", 0),
         telemetryVoltage = fw.session:get("telemetryVoltage", 0),
         telemetryCurrent = fw.session:get("telemetryCurrent", 0),
@@ -315,6 +326,12 @@ function runtime.ensureFramework()
 
     framework:registerTask("logging", LoggingTask, {
         priority = 7,
+        interval = 0.50,
+        enabled = true
+    })
+
+    framework:registerTask("app_cleanup", AppCleanupTask, {
+        priority = 6,
         interval = 0.50,
         enabled = true
     })

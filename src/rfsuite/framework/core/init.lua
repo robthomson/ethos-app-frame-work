@@ -129,6 +129,13 @@ function framework:init(config)
     self.session:set("initialized", true)
     self.session:set("appActive", false)
     self.session:setMultiple({
+        appResident = false,
+        appInactiveAt = 0,
+        appCleanupPending = false,
+        appCleanupDueAt = 0,
+        appCleanupLastAt = 0,
+        appCleanupRuns = 0,
+        appCleanupReason = "startup",
         idleGcEnabled = self.config.developer and self.config.developer.idleGcEnabled == true or false,
         idleGcLastAt = 0,
         idleGcCycleComplete = false,
@@ -282,9 +289,17 @@ function framework:isAppActive()
 end
 
 function framework:activateApp()
+    local now = os.clock()
     self:_createAppInstance()
     self._appActive = true
-    self.session:set("appActive", true)
+    self.session:setMultipleSilent({
+        appActive = true,
+        appInactiveAt = 0,
+        appCleanupPending = false,
+        appCleanupDueAt = 0,
+        appCleanupReason = "active",
+        appResident = self._app ~= nil
+    })
     
     if self._app and self._app.onActivate then
         self._app:onActivate()
@@ -294,8 +309,17 @@ function framework:activateApp()
 end
 
 function framework:deactivateApp()
+    local now = os.clock()
+    local delay = tonumber(self.config.app and self.config.app.idleCleanupDelay) or 5.0
+
     self._appActive = false
-    self.session:set("appActive", false)
+    self.session:setMultipleSilent({
+        appActive = false,
+        appInactiveAt = now,
+        appCleanupPending = self._appUnloadOnDeactivate ~= true and self._app ~= nil,
+        appCleanupDueAt = self._appUnloadOnDeactivate ~= true and self._app ~= nil and (now + math.max(0, delay)) or 0,
+        appCleanupReason = "deactivate"
+    })
     
     if self._app and self._app.onDeactivate then
         self._app:onDeactivate()
@@ -316,6 +340,30 @@ function framework:deactivateApp()
     else
         self.session:set("appResident", self._app ~= nil)
     end
+end
+
+function framework:releaseInactiveApp(reason)
+    if self._appActive == true then
+        return false
+    end
+
+    if self._app and self._app.close then
+        pcall(self._app.close, self._app)
+    end
+    self._app = nil
+
+    if type(self._appUnloader) == "function" then
+        pcall(self._appUnloader, self)
+    end
+
+    self.session:setMultipleSilent({
+        appResident = false,
+        appCleanupPending = false,
+        appCleanupDueAt = 0,
+        appCleanupReason = reason or "release"
+    })
+    collectgarbage("collect")
+    return true
 end
 
 --[[ TASK REGISTRATION & SCHEDULING ]]

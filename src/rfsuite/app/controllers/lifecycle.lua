@@ -91,6 +91,7 @@ end
 
 function controller:deactivate()
     local app = self:_app()
+    local canTouchForm = app and app.framework and app.framework.isAppActive and app.framework:isAppActive() == true
 
     if app and app.loaderController then
         app.loaderController:reset()
@@ -108,7 +109,7 @@ function controller:deactivate()
     if app and app._closeNode then
         app:_closeNode(app.currentNode)
     end
-    if form and form.clear then
+    if canTouchForm and form and form.clear then
         form.clear()
     end
     if app and app.formHost then
@@ -141,6 +142,7 @@ end
 
 function controller:close()
     local app = self:_app()
+    local canTouchForm = app and app.framework and app.framework.isAppActive and app.framework:isAppActive() == true
 
     if app and app.loaderController then
         app.loaderController:reset()
@@ -157,7 +159,7 @@ function controller:close()
     if app and app._closeNode then
         app:_closeNode(app.currentNode)
     end
-    if form and form.clear then
+    if canTouchForm and form and form.clear then
         form.clear()
     end
     if app and app.formHost then

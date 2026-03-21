@@ -44,6 +44,10 @@ function session:set(key, value)
     end
 end
 
+function session:setSilent(key, value)
+    self.data[key] = value
+end
+
 function session:get(key, default)
     local value = self.data[key]
     if value == nil then
@@ -73,6 +77,12 @@ end
 function session:setMultiple(updates)
     for key, value in pairs(updates) do
         self:set(key, value)
+    end
+end
+
+function session:setMultipleSilent(updates)
+    for key, value in pairs(updates) do
+        self:setSilent(key, value)
     end
 end
 
