@@ -9,7 +9,7 @@ local callbackFactory = require("framework.core.callback")
 local AudioLib = require("lib.audio")
 
 local MENU_ROOT_PATH = "app/menu/root.lua"
-local MASK_CACHE_MAX = 16
+local MASK_CACHE_MAX = 96
 local NOOP_PAINT = function() end
 local HEADER_NAV_HEIGHT_REDUCTION = 4
 local HEADER_NAV_Y_SHIFT = 6
@@ -38,6 +38,8 @@ local APP_RENDER_CALLBACK_WAKEUP_OPTIONS = {
     category = "render"
 }
 local APP_MAINTENANCE_PHASES = 3
+local SHORTCUTS_MODULE_CACHE = nil
+local MENU_VISIBILITY_MODULE_CACHE = nil
 
 local function loadLuaTable(path)
     if type(path) ~= "string" or path == "" then
@@ -62,9 +64,14 @@ local function loadLuaTable(path)
 end
 
 local function loadShortcutsModule()
+    if type(SHORTCUTS_MODULE_CACHE) == "table" then
+        return SHORTCUTS_MODULE_CACHE
+    end
+
     local mod = select(1, loadLuaTable("app/lib/shortcuts.lua"))
 
     if type(mod) == "table" then
+        SHORTCUTS_MODULE_CACHE = mod
         return mod
     end
 
@@ -72,9 +79,14 @@ local function loadShortcutsModule()
 end
 
 local function loadMenuVisibilityModule()
+    if type(MENU_VISIBILITY_MODULE_CACHE) == "table" then
+        return MENU_VISIBILITY_MODULE_CACHE
+    end
+
     local mod = select(1, loadLuaTable("app/lib/menu_visibility.lua"))
 
     if type(mod) == "table" then
+        MENU_VISIBILITY_MODULE_CACHE = mod
         return mod
     end
 
@@ -483,34 +495,8 @@ function App:_loadMask(path)
 end
 
 function App:_pruneMaskCacheForNode(node)
-    local keep = {}
-    local newOrder = {}
-    local i
-    local item
-    local path
-
-    if type(self.maskCache) ~= "table" or type(self.maskCacheOrder) ~= "table" then
-        return
-    end
-
-    for i = 1, #((node and node.items) or {}) do
-        item = node.items[i]
-        path = item and item.image
-        if type(path) == "string" and path ~= "" then
-            keep[path] = true
-        end
-    end
-
-    for i = 1, #self.maskCacheOrder do
-        path = self.maskCacheOrder[i]
-        if keep[path] == true then
-            newOrder[#newOrder + 1] = path
-        else
-            self.maskCache[path] = nil
-        end
-    end
-
-    self.maskCacheOrder = newOrder
+    local _ = node
+    return
 end
 
 function App:_afterNodeChanged()
@@ -2450,6 +2436,15 @@ function App:_buildNodeForm()
     local node = self.currentNode or self:_loadRootNode()
     local built
     local hasCustomBuilder
+    local iconPaths
+    local index
+
+    if self:_nodeHasMenuItems(node) == true then
+        iconPaths = self:_collectNodeIconPaths(node)
+        for index = 1, #iconPaths do
+            self:_loadMask(iconPaths[index])
+        end
+    end
 
     safeFormClear()
     self:_clearFormRefs()
@@ -2469,6 +2464,10 @@ function App:_buildNodeForm()
     end
 
     self:_buildGridButtons(node.items or {})
+    if self:_nodeHasMenuItems(node) == true then
+        self.menuEnableSignature = self:_currentMenuEnableSignature()
+        self.pendingFocusRestore = false
+    end
     self:_syncSaveButtonState()
     if self.pendingFocusRestore == true then
         self:_restoreAppFocus()
