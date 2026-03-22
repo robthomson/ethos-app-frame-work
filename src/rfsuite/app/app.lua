@@ -188,6 +188,10 @@ local function shouldCacheLoadedTable(path)
         return false
     end
 
+    if path:sub(1, 12) == "app/modules/" then
+        return false
+    end
+
     return true
 end
 
@@ -1710,11 +1714,15 @@ function App:_releaseNodeMemory(node)
     node.tool = nil
     node.help = nil
     node.canSave = nil
+    node.__modulePath = nil
     node.close = nil
 end
 
 function App:_closeNode(node)
+    local modulePath = type(node) == "table" and node.__modulePath or nil
+
     self:_runNodeHook(node, "close")
+    clearLuaTableEntry(modulePath)
     self:_releaseNodeMemory(node)
 end
 

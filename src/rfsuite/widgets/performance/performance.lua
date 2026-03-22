@@ -15,6 +15,47 @@ local cpuRowBuffer = {}
 local memoryRowBuffer = {}
 local runtimeRowBuffer = {}
 local consoleLineBuffer = {}
+local MEMORY_AVERAGE_WINDOW_SECONDS = 5.0
+local MEMORY_AVERAGE_DISPLAY_SECONDS = 2.0
+
+local function trimMemorySamples(samples, now)
+    local cutoff = (now or os.clock()) - MEMORY_AVERAGE_WINDOW_SECONDS
+
+    while #samples > 0 and (samples[1].time or 0) < cutoff do
+        table.remove(samples, 1)
+    end
+end
+
+local function sampleMemoryAverage(instance, session, now)
+    local samples = instance.memorySamples
+    local current = tonumber(session:get("luaMemoryKB", 0)) or 0
+
+    samples[#samples + 1] = {
+        time = now or os.clock(),
+        value = current
+    }
+
+    trimMemorySamples(samples, now)
+end
+
+local function refreshMemoryAverage(instance, now)
+    local samples = instance.memorySamples
+    local total = 0
+    local index
+
+    trimMemorySamples(samples, now)
+
+    if #samples == 0 then
+        return instance.displayMemoryAverageKB or instance.memoryAverageKB or 0
+    end
+
+    for index = 1, #samples do
+        total = total + (tonumber(samples[index].value) or 0)
+    end
+
+    instance.memoryAverageKB = total / #samples
+    return instance.memoryAverageKB
+end
 
 local function fontSmall()
     return FONT_XS or FONT_STD
@@ -84,15 +125,17 @@ local function cpuRows(session, rows)
     return rows
 end
 
-local function memoryRows(session, rows)
+local function memoryRows(session, rows, instance)
     rows[1] = "Lua Used"
     rows[2] = string.format("%.1f KB", session:get("luaMemoryKB", 0))
-    rows[3] = "Lua Peak"
-    rows[4] = string.format("%.1f KB", session:get("luaMemoryPeakKB", 0))
-    rows[5] = "Lua Free"
-    rows[6] = string.format("%.1f KB", session:get("luaFreeRamKB", 0))
-    rows[7] = "System Free"
-    rows[8] = string.format("%.1f KB", session:get("systemFreeRamKB", 0))
+    rows[3] = "Lua Avg 5s"
+    rows[4] = string.format("%.1f KB", tonumber(instance and instance.displayMemoryAverageKB) or 0)
+    rows[5] = "Lua Peak"
+    rows[6] = string.format("%.1f KB", session:get("luaMemoryPeakKB", 0))
+    rows[7] = "Lua Free"
+    rows[8] = string.format("%.1f KB", session:get("luaFreeRamKB", 0))
+    rows[9] = "System Free"
+    rows[10] = string.format("%.1f KB", session:get("systemFreeRamKB", 0))
     return rows
 end
 
@@ -116,18 +159,35 @@ end
 
 function widget.create()
     return {
-        lastInvalidate = 0
+        lastInvalidate = 0,
+        memorySamples = {},
+        memoryAverageKB = 0,
+        displayMemoryAverageKB = 0,
+        lastMemoryAverageDisplayAt = 0
     }
 end
 
 function widget.wakeup(instance)
+    local framework = runtime.ensureFramework()
+    local session = framework and framework.session or nil
+    local now = os.clock()
+
     runtime.backgroundStatus()
+
+    if session then
+        sampleMemoryAverage(instance, session, now)
+        refreshMemoryAverage(instance, now)
+        if (instance.lastMemoryAverageDisplayAt or 0) == 0
+            or now - (instance.lastMemoryAverageDisplayAt or 0) >= MEMORY_AVERAGE_DISPLAY_SECONDS then
+            instance.displayMemoryAverageKB = instance.memoryAverageKB
+            instance.lastMemoryAverageDisplayAt = now
+        end
+    end
 
     if not lcd or not lcd.invalidate then
         return
     end
 
-    local now = os.clock()
     local interval = (lcd.isVisible and lcd.isVisible()) and 0.25 or 1.0
     if now - (instance.lastInvalidate or 0) >= interval then
         lcd.invalidate()
@@ -135,7 +195,7 @@ function widget.wakeup(instance)
     end
 end
 
-function widget.paint()
+function widget.paint(instance)
     local framework = runtime.ensureFramework()
     local session = framework.session
     local log = framework.log
@@ -167,7 +227,7 @@ function widget.paint()
         drawRows(leftX, cardY, leftW, cpuRows(session, cpuRowBuffer))
 
         drawCardFrame(middleX, cardY, middleW, topH, "Memory")
-        drawRows(middleX, cardY, middleW, memoryRows(session, memoryRowBuffer))
+        drawRows(middleX, cardY, middleW, memoryRows(session, memoryRowBuffer, instance))
 
         drawCardFrame(rightX, cardY, rightW, topH, "Runtime")
         drawRows(rightX, cardY, rightW, runtimeRows(session, runtimeRowBuffer))
@@ -184,7 +244,7 @@ function widget.paint()
         drawRows(leftX, cardY, totalW, cpuRows(session, cpuRowBuffer))
 
         drawCardFrame(leftX, cardY + smallCardH + gap, totalW, smallCardH, "Memory")
-        drawRows(leftX, cardY + smallCardH + gap, totalW, memoryRows(session, memoryRowBuffer))
+        drawRows(leftX, cardY + smallCardH + gap, totalW, memoryRows(session, memoryRowBuffer, instance))
 
         drawCardFrame(leftX, top3Y, totalW, smallCardH, "Runtime")
         drawRows(leftX, top3Y, totalW, runtimeRows(session, runtimeRowBuffer))
