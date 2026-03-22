@@ -64,6 +64,9 @@ framework._initialized = false
 framework._running = false
 framework._profiler = nil
 framework._profilerSessionBuffer = {}
+framework._profilerLastSyncAt = 0
+framework._profilerSessionInitialized = false
+framework._profilerSessionSyncInterval = 0.25
 framework._idleGcLastAt = 0
 framework._idleGcValues = {}
 framework._callbackWakeupOptions = {
@@ -99,6 +102,22 @@ function framework:_defaultPreferences()
     }
 end
 
+local function mergeTableOverrides(base, overrides)
+    local merged = {}
+    local key
+    local value
+
+    for key, value in pairs(base or {}) do
+        merged[key] = value
+    end
+
+    for key, value in pairs(overrides or {}) do
+        merged[key] = value
+    end
+
+    return merged
+end
+
 --[[ INITIALIZATION ]]
 
 function framework:init(config)
@@ -113,11 +132,15 @@ function framework:init(config)
         path = self.config.prefFile,
         defaults = self.config.preferencesDefaults or self:_defaultPreferences()
     })
+    self.config.developer = mergeTableOverrides(self.config.developer or {}, self.preferences:section("developer", {}))
     self.log:init({
-        developer = self.preferences.developer or {},
-        minLevel = (self.config.developer and self.config.developer.loglevel) or (self.preferences.developer and self.preferences.developer.loglevel) or "info"
+        developer = self.config.developer or {},
+        minLevel = (self.config.developer and self.config.developer.loglevel) or "info"
     })
     self._profiler = self.profiler.new(self.config.developer or {})
+    self._profilerLastSyncAt = 0
+    self._profilerSessionInitialized = false
+    self._profilerSessionSyncInterval = tonumber((self.config.developer or {}).profilerSessionSyncInterval) or 0.25
     self._idleGcLastAt = 0
     self._taskSchedulerOptions = {
         maxCriticalLoopMs = ((self.config.taskScheduler or {}).maxCriticalLoopMs) or 4,
@@ -142,7 +165,7 @@ function framework:init(config)
         idleGcCycleComplete = false,
         idleGcRuns = 0
     })
-    self:_syncProfilerSession()
+    self:_syncProfilerSession(true)
     
     return self
 end
@@ -151,9 +174,11 @@ function framework:_profileLog(line)
     self.log:info("%s", line)
 end
 
-function framework:_syncProfilerSession()
+function framework:_syncProfilerSession(force)
     local state = self._profiler
     local values = self._profilerSessionBuffer
+    local now = os.clock()
+    local syncInterval = tonumber(self._profilerSessionSyncInterval) or 0.25
     local loop = state and state.loop or nil
     local memory = state and state.memory or nil
     local taskCount = 0
@@ -161,6 +186,17 @@ function framework:_syncProfilerSession()
     local topTaskAvgMs = 0
     local topTaskLastMs = 0
     local topTaskMaxMs = 0
+    local enabled = state and state.enabled == true
+
+    if force ~= true then
+        if enabled ~= true then
+            if self._profilerSessionInitialized == true then
+                return
+            end
+        elseif syncInterval > 0 and (now - (self._profilerLastSyncAt or 0)) < syncInterval then
+            return
+        end
+    end
 
     if state and state.taskprofiler and state.tasks then
         local bestAvg = nil
@@ -197,7 +233,9 @@ function framework:_syncProfilerSession()
     values.topTaskLastMs = topTaskLastMs
     values.topTaskMaxMs = topTaskMaxMs
 
-    self.session:setMultiple(values)
+    self.session:setMultipleSilent(values)
+    self._profilerLastSyncAt = now
+    self._profilerSessionInitialized = true
 end
 
 function framework:_runIdleGc(now)
@@ -587,12 +625,13 @@ function framework:wakeupTasks()
         return
     end
 
-    local loopToken = self._profiler and self.profiler:beginLoop(self._profiler) or nil
+    local profilerEnabled = self._profiler and self._profiler.enabled == true
+    local loopToken = profilerEnabled and self.profiler:beginLoop(self._profiler) or nil
     self:_wakeupTasks()
     self.callback:wakeup(self._callbackWakeupOptions)
     self:_runIdleGc(os.clock())
 
-    if self._profiler then
+    if profilerEnabled then
         self.profiler:endLoop(self._profiler, loopToken)
         self:_syncProfilerSession()
     end
