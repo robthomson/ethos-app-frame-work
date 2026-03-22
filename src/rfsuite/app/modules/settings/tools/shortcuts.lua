@@ -5,7 +5,8 @@
 
 local Page = {}
 
-local SHORTCUTS = assert(loadfile("app/lib/shortcuts.lua"))()
+local ModuleLoader = require("framework.utils.module_loader")
+local SHORTCUTS = ModuleLoader.loadFileCached("app/lib/shortcuts.lua")
 local GROUP_PREF_KEY = "settings_shortcuts_group"
 
 local function prefBool(value, default)

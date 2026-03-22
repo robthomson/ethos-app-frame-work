@@ -5,6 +5,7 @@
 
 local TelemetryConfig = require("telemetry.config")
 local BatteryConfig = require("telemetry.battery")
+local ModuleLoader = require("framework.utils.module_loader")
 
 local SensorsTask = {}
 local SENSOR_LOST_MUTE_SECONDS = 10.0
@@ -19,40 +20,18 @@ local PROVIDER_MODULES = {
 local PROVIDER_FACTORIES = {}
 
 local function loadModule(moduleName)
-    local ok
     local result
-    local chunk
     local path
-    local loadErr
 
     result = PROVIDER_FACTORIES[moduleName]
     if result ~= nil then
         return result
     end
 
-    ok, result = pcall(require, moduleName)
-    if ok then
-        PROVIDER_FACTORIES[moduleName] = result
-        return result
-    end
-
     path = string.gsub(moduleName, "%.", "/") .. ".lua"
-    if not loadfile then
-        error(result)
-    end
-
-    chunk, loadErr = loadfile(path)
-    if not chunk then
-        error(loadErr or result)
-    end
-
-    ok, result = pcall(chunk)
-    if ok then
-        PROVIDER_FACTORIES[moduleName] = result
-        return result
-    end
-
-    error(result)
+    result = ModuleLoader.requireOrLoad(moduleName, path)
+    PROVIDER_FACTORIES[moduleName] = result
+    return result
 end
 
 function SensorsTask:_resetTelemetryConfigBootstrap()

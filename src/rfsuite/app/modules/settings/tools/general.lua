@@ -3,12 +3,8 @@
   GPLv3 — https://www.gnu.org/licenses/gpl-3.0.en.html
 ]] --
 
-local ok, PrefsPage = pcall(require, "app.lib.prefs_page")
-
-if not ok or type(PrefsPage) ~= "table" then
-    local chunk = assert(loadfile("app/lib/prefs_page.lua"))
-    PrefsPage = chunk()
-end
+local ModuleLoader = require("framework.utils.module_loader")
+local PrefsPage = ModuleLoader.requireOrLoad("app.lib.prefs_page", "app/lib/prefs_page.lua")
 
 local ICON_SIZE_CHOICES = {
     {"Text", 0},

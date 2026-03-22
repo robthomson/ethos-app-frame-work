@@ -22,6 +22,7 @@ local AppCleanupTask = require("tasks.app_cleanup")
 local runtime = {}
 runtime._backgroundStatusValues = {}
 runtime._backgroundStatusResult = {}
+runtime._appModuleCache = nil
 
 runtime.config = {
     toolName = "Rotorflight",
@@ -116,7 +117,7 @@ runtime.config = {
         missingAfter = 3.0
     },
     app = {
-        idleCleanupDelay = 5.0
+        idleCleanupDelay = 0.20
     }
 }
 
@@ -148,17 +149,26 @@ local function loadLuaTable(path)
 end
 
 local function loadAppModule()
+    if type(runtime._appModuleCache) == "table" then
+        return runtime._appModuleCache
+    end
+
     local ok, module = pcall(require, "app.app")
     if ok and type(module) == "table" then
+        runtime._appModuleCache = module
         return module
     end
 
-    return loadLuaTable("app/app.lua")
+    module = loadLuaTable("app/app.lua")
+    runtime._appModuleCache = module
+    return module
 end
 
 local function unloadAppModules()
     local loaded
     local name
+
+    runtime._appModuleCache = nil
 
     if not (package and type(package.loaded) == "table") then
         return
@@ -170,6 +180,9 @@ local function unloadAppModules()
             loaded[name] = nil
         end
     end
+
+    pcall(collectgarbage, "collect")
+    pcall(collectgarbage, "collect")
 end
 
 local function seedSession(fw)
@@ -332,14 +345,15 @@ function runtime.ensureFramework()
 
     framework:registerTask("app_cleanup", AppCleanupTask, {
         priority = 6,
-        interval = 0.50,
+        interval = 0.10,
         enabled = true
     })
 
     framework:registerApp(nil, {
         loader = loadAppModule,
         unload = unloadAppModules,
-        unloadOnDeactivate = false
+        unloadOnDeactivate = false,
+        releaseOnDeactivate = true
     })
     seedSession(framework)
 

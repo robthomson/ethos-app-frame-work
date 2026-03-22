@@ -5,6 +5,7 @@
 
 local catalog = require("telemetry.catalog")
 local utils = require("lib.utils")
+local ModuleLoader = require("framework.utils.module_loader")
 
 local TelemetryTask = {}
 
@@ -20,33 +21,10 @@ local ONCHANGE_INTERVAL = 0.25
 local STATS_PER_WAKEUP = 4
 
 local function loadModule(moduleName)
-    local ok
-    local result
-    local chunk
     local path
-    local loadErr
-
-    ok, result = pcall(require, moduleName)
-    if ok then
-        return result
-    end
 
     path = string.gsub(moduleName, "%.", "/") .. ".lua"
-    if not loadfile then
-        error(result)
-    end
-
-    chunk, loadErr = loadfile(path)
-    if not chunk then
-        error(result)
-    end
-
-    ok, result = pcall(chunk)
-    if ok then
-        return result
-    end
-
-    error(result)
+    return ModuleLoader.requireOrLoad(moduleName, path)
 end
 
 local function getSource(descriptor)

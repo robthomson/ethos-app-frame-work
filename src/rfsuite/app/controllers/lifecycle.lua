@@ -121,9 +121,6 @@ function controller:deactivate()
         app.currentNode = nil
         app.pathStack = {}
     end
-    if app and app._clearMaskCache then
-        app:_clearMaskCache()
-    end
     if app then
         app.snapshot = nil
         app.telemetryTask = nil

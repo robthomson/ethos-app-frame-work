@@ -56,6 +56,7 @@ framework._appModule = nil
 framework._appLoader = nil
 framework._appUnloader = nil
 framework._appUnloadOnDeactivate = false
+framework._appReleaseOnDeactivate = false
 framework._appActive = false
 
 -- State
@@ -244,6 +245,7 @@ function framework:registerApp(appModule, options)
     self._appLoader = options.loader
     self._appUnloader = options.unload
     self._appUnloadOnDeactivate = options.unloadOnDeactivate == true
+    self._appReleaseOnDeactivate = options.releaseOnDeactivate == true
     self._app = nil
     self.session:set("appRegistered", true)
 end
@@ -311,6 +313,7 @@ end
 function framework:deactivateApp()
     local now = os.clock()
     local delay = tonumber(self.config.app and self.config.app.idleCleanupDelay) or 5.0
+    local shouldKeepResident = self._appUnloadOnDeactivate ~= true and self._appReleaseOnDeactivate ~= true and self._app ~= nil
 
     if self._app and self._app.onDeactivate then
         self._app:onDeactivate()
@@ -320,8 +323,8 @@ function framework:deactivateApp()
     self.session:setMultipleSilent({
         appActive = false,
         appInactiveAt = now,
-        appCleanupPending = self._appUnloadOnDeactivate ~= true and self._app ~= nil,
-        appCleanupDueAt = self._appUnloadOnDeactivate ~= true and self._app ~= nil and (now + math.max(0, delay)) or 0,
+        appCleanupPending = shouldKeepResident,
+        appCleanupDueAt = shouldKeepResident and (now + math.max(0, delay)) or 0,
         appCleanupReason = "deactivate"
     })
     
@@ -335,6 +338,10 @@ function framework:deactivateApp()
         if type(self._appUnloader) == "function" then
             pcall(self._appUnloader, self)
         end
+        self.session:set("appResident", false)
+        collectgarbage("collect")
+    elseif self._appReleaseOnDeactivate == true then
+        self._app = nil
         self.session:set("appResident", false)
         collectgarbage("collect")
     else
