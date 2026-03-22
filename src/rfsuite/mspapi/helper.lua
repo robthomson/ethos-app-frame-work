@@ -82,22 +82,41 @@ function mspHelper.writeSInt(buf, value, numBytes, byteorder)
     mspHelper.writeUInt(buf, value, numBytes, byteorder)
 end
 
-for bits = 8, 512, 8 do
-    local bytes = bits / 8
+local function resolveNumericAccessor(name)
+    local mode, signedness, bitsText = tostring(name):match("^(read)([US])(%d+)$")
+    local bits
+    local bytes
 
-    mspHelper["readU" .. bits] = function(buf, byteorder)
-        return mspHelper.readUInt(buf, bytes, byteorder)
+    if not mode then
+        mode, signedness, bitsText = tostring(name):match("^(write)([US])(%d+)$")
     end
 
-    mspHelper["readS" .. bits] = function(buf, byteorder)
-        return mspHelper.readSInt(buf, bytes, byteorder)
+    bits = tonumber(bitsText)
+    if not mode or not bits or bits < 8 or (bits % 8) ~= 0 or bits > 512 then
+        return nil
     end
 
-    mspHelper["writeU" .. bits] = function(buf, value, byteorder)
-        mspHelper.writeUInt(buf, value, bytes, byteorder)
+    bytes = bits / 8
+
+    if mode == "read" then
+        if signedness == "U" then
+            return function(buf, byteorder)
+                return mspHelper.readUInt(buf, bytes, byteorder)
+            end
+        end
+
+        return function(buf, byteorder)
+            return mspHelper.readSInt(buf, bytes, byteorder)
+        end
     end
 
-    mspHelper["writeS" .. bits] = function(buf, value, byteorder)
+    if signedness == "U" then
+        return function(buf, value, byteorder)
+            mspHelper.writeUInt(buf, value, bytes, byteorder)
+        end
+    end
+
+    return function(buf, value, byteorder)
         mspHelper.writeSInt(buf, value, bytes, byteorder)
     end
 end
@@ -109,5 +128,18 @@ end
 function mspHelper.writeRAW(buf, value)
     buf[#buf + 1] = (tonumber(value) or 0) % 256
 end
+
+setmetatable(mspHelper, {
+    __index = function(tableRef, key)
+        local accessor = resolveNumericAccessor(key)
+
+        if accessor then
+            rawset(tableRef, key, accessor)
+            return accessor
+        end
+
+        return nil
+    end
+})
 
 return mspHelper

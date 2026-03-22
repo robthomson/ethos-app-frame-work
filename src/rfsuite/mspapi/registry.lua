@@ -4,10 +4,10 @@
 ]] --
 
 local framework = require("framework.core.init")
-local helpCatalog = require("mspapi.help_catalog")
 
 local api = {
     loaded = {},
+    helpLoaded = {},
     apidata = {
         positionmap = {},
         receivedBytes = {},
@@ -44,15 +44,48 @@ local function loadDefinitionFromPath(name)
 end
 
 local function loadHelp(name)
+    local ok
+    local moduleOrErr
+    local baseDir
+    local path
+    local chunk
+    local loadErr
+
     if type(name) ~= "string" or name == "" then
         return nil
     end
 
-    if type(helpCatalog) == "table" and type(helpCatalog.get) == "function" then
-        return helpCatalog.get(name)
+    if api.helpLoaded[name] ~= nil then
+        return api.helpLoaded[name] or nil
     end
 
-    return nil
+    ok, moduleOrErr = pcall(require, "mspapi.apihelp." .. name)
+    if not ok then
+        baseDir = framework and framework.config and framework.config.baseDir or "rfsuite"
+        path = "SCRIPTS:/" .. tostring(baseDir) .. "/mspapi/apihelp/" .. tostring(name) .. ".lua"
+
+        if type(loadfile) == "function" then
+            chunk, loadErr = loadfile(path)
+            if chunk then
+                ok, moduleOrErr = pcall(chunk)
+                if not ok then
+                    moduleOrErr = nil
+                end
+            else
+                moduleOrErr = nil
+            end
+        else
+            moduleOrErr = nil
+        end
+    end
+
+    if type(moduleOrErr) ~= "table" then
+        api.helpLoaded[name] = false
+        return nil
+    end
+
+    api.helpLoaded[name] = moduleOrErr
+    return moduleOrErr
 end
 
 local function injectHelpIntoStructure(name, structure)
@@ -134,6 +167,7 @@ function api.unload(name)
     end
 
     api.loaded[name] = nil
+    api.helpLoaded[name] = nil
     api.apidata.positionmap[name] = nil
     api.apidata.receivedBytes[name] = nil
     api.apidata.receivedBytesCount[name] = nil
@@ -142,12 +176,14 @@ function api.unload(name)
     api.apidata._lastReadMode[name] = nil
     api.apidata._lastWriteMode[name] = nil
     package.loaded["mspapi.definitions." .. tostring(name)] = nil
+    package.loaded["mspapi.apihelp." .. tostring(name)] = nil
 
     return true
 end
 
 function api.clear()
     api.loaded = {}
+    api.helpLoaded = {}
     api.apidata = {
         positionmap = {},
         receivedBytes = {},
@@ -175,8 +211,12 @@ function api.reset()
     for name in pairs(api.loaded) do
         package.loaded["mspapi.definitions." .. name] = nil
     end
+    for name in pairs(api.helpLoaded) do
+        package.loaded["mspapi.apihelp." .. name] = nil
+    end
 
     api.loaded = {}
+    api.helpLoaded = {}
     api:resetData()
 end
 
