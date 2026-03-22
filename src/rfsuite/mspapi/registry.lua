@@ -20,6 +20,63 @@ local api = {
     deltaCacheEnabled = false
 }
 
+local function countKeys(tbl)
+    local count = 0
+
+    if type(tbl) ~= "table" then
+        return 0
+    end
+
+    for _ in pairs(tbl) do
+        count = count + 1
+    end
+
+    return count
+end
+
+local function countLoadedHelp(tbl)
+    local helpCount = 0
+    local missCount = 0
+    local value
+
+    if type(tbl) ~= "table" then
+        return 0, 0
+    end
+
+    for _, value in pairs(tbl) do
+        if value == false then
+            missCount = missCount + 1
+        else
+            helpCount = helpCount + 1
+        end
+    end
+
+    return helpCount, missCount
+end
+
+local function countDataStats(data)
+    local seen = {}
+    local entryCount = 0
+    local dataKey
+    local dataTable
+    local apiName
+
+    if type(data) ~= "table" then
+        return 0, 0
+    end
+
+    for dataKey, dataTable in pairs(data) do
+        if type(dataTable) == "table" then
+            for apiName in pairs(dataTable) do
+                seen[apiName] = true
+                entryCount = entryCount + 1
+            end
+        end
+    end
+
+    return countKeys(seen), entryCount
+end
+
 local function loadDefinitionFromPath(name)
     local baseDir = framework and framework.config and framework.config.baseDir or "rfsuite"
     local path = "SCRIPTS:/" .. tostring(baseDir) .. "/mspapi/definitions/" .. tostring(name) .. ".lua"
@@ -242,6 +299,25 @@ function api.reset()
     api.loaded = {}
     api.helpLoaded = {}
     api:resetData()
+end
+
+function api.getStats()
+    local helpCount
+    local helpMissCount
+    local dataApiCount
+    local dataEntryCount
+
+    helpCount, helpMissCount = countLoadedHelp(api.helpLoaded)
+    dataApiCount, dataEntryCount = countDataStats(api.apidata)
+
+    return {
+        loadedCount = countKeys(api.loaded),
+        helpCount = helpCount,
+        helpMissCount = helpMissCount,
+        dataApiCount = dataApiCount,
+        dataEntryCount = dataEntryCount,
+        deltaCacheEnabled = api.deltaCacheEnabled == true
+    }
 end
 
 function api.setDeltaCacheEnabled(enabled)

@@ -1375,6 +1375,9 @@ local function finishRead(node)
     updateDynamicTitle(node)
     refreshBuiltControls(node)
     releasePageApis(node, false)
+    if node.app and node.app.framework and node.app.framework.captureMemoryDebug then
+        node.app.framework:captureMemoryDebug("page_ready:" .. tostring(node.baseTitle or node.title or "msp"))
+    end
     if hasBuiltForm ~= true then
         node.app:_invalidateForm()
     end

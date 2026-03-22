@@ -67,6 +67,7 @@ framework._profilerSessionBuffer = {}
 framework._profilerLastSyncAt = 0
 framework._profilerSessionInitialized = false
 framework._profilerSessionSyncInterval = 0.25
+framework._memoryDebugHistory = {}
 framework._idleGcLastAt = 0
 framework._idleGcValues = {}
 framework._callbackWakeupOptions = {
@@ -116,6 +117,80 @@ local function mergeTableOverrides(base, overrides)
     end
 
     return merged
+end
+
+local function countKeys(tbl)
+    local count = 0
+
+    if type(tbl) ~= "table" then
+        return 0
+    end
+
+    for _ in pairs(tbl) do
+        count = count + 1
+    end
+
+    return count
+end
+
+local function sumValues(tbl)
+    local total = 0
+    local value
+
+    if type(tbl) ~= "table" then
+        return 0
+    end
+
+    for _, value in pairs(tbl) do
+        if type(value) == "number" then
+            total = total + value
+        end
+    end
+
+    return total
+end
+
+local function pushHistory(history, entry, limit)
+    if type(history) ~= "table" then
+        return
+    end
+
+    history[#history + 1] = entry
+    while #history > (limit or 8) do
+        table.remove(history, 1)
+    end
+end
+
+local function setSessionValues(session, values)
+    local setter = session and (session.setMultipleSilent or session.setMultiple)
+
+    if type(setter) ~= "function" then
+        return
+    end
+
+    pcall(setter, session, values)
+end
+
+local function countLoadedModules(prefix)
+    local loaded = package and package.loaded or nil
+    local count = 0
+    local name
+
+    if type(loaded) ~= "table" then
+        return 0
+    end
+
+    for name in pairs(loaded) do
+        if type(name) == "string" and (prefix == nil or name:sub(1, #prefix) == prefix) then
+            count = count + 1
+        end
+    end
+
+    return count
+end
+
+local function isTruthy(value)
+    return value == true or value == "true"
 end
 
 --[[ INITIALIZATION ]]
@@ -344,6 +419,7 @@ function framework:activateApp()
     if self._app and self._app.onActivate then
         self._app:onActivate()
     end
+    self:captureMemoryDebug("app_open")
     
     self:_emit("app:activated")
 end
@@ -408,6 +484,7 @@ function framework:releaseInactiveApp(reason)
         appCleanupReason = reason or "release"
     })
     collectgarbage("collect")
+    self:captureMemoryDebug("app_release:" .. tostring(reason or "release"))
     return true
 end
 
@@ -693,9 +770,103 @@ function framework:getStats()
         callbackStats = self.callback:getStats(),
         eventStats = self.events:listEvents(),
         registryStats = self.registry:getStats(),
-        profileStats = self._profiler and self.profiler:getSummary(self._profiler) or nil
+        profileStats = self._profiler and self.profiler:getSummary(self._profiler) or nil,
+        memoryDebug = self._memoryDebugHistory[#self._memoryDebugHistory]
     }
     return stats
+end
+
+function framework:isMemoryDebugEnabled()
+    return isTruthy(self.config and self.config.developer and self.config.developer.memstats)
+end
+
+function framework:captureMemoryDebug(label)
+    if self:isMemoryDebugEnabled() ~= true then
+        return nil
+    end
+
+    local eventStats = self.events and self.events.listEvents and self.events:listEvents() or {}
+    local callbackStats = self.callback and self.callback.getStats and self.callback:getStats() or {}
+    local callbackQueues = callbackStats.queues or {}
+    local previous = self._memoryDebugHistory[#self._memoryDebugHistory]
+    local app = self:getApp()
+    local appStats = app and app.getDebugStats and app:getDebugStats() or {}
+    local mspMeta = self._taskMetadata and self._taskMetadata.msp or nil
+    local mspTask = mspMeta and mspMeta.instance or nil
+    local mspStats = mspTask and mspTask.api and mspTask.api.getStats and mspTask.api:getStats() or {}
+    local luaKB = collectgarbage and collectgarbage("count") or 0
+    local snapshot = {
+        label = tostring(label or "snapshot"),
+        time = os.clock(),
+        luaKB = luaKB,
+        deltaLuaKB = previous and (luaKB - (tonumber(previous.luaKB) or 0)) or 0,
+        packageLoaded = countLoadedModules(nil),
+        packageLoadedApp = countLoadedModules("app."),
+        callbackQueued = tonumber(callbackStats.totalQueued) or 0,
+        callbackQueues = countKeys(callbackQueues),
+        eventNames = countKeys(eventStats),
+        eventHandlers = sumValues(eventStats),
+        mspLoaded = tonumber(mspStats.loadedCount) or 0,
+        mspHelp = tonumber(mspStats.helpCount) or 0,
+        mspHelpMiss = tonumber(mspStats.helpMissCount) or 0,
+        mspDataApis = tonumber(mspStats.dataApiCount) or 0,
+        mspDataEntries = tonumber(mspStats.dataEntryCount) or 0,
+        appPathDepth = tonumber(appStats.pathDepth) or 0,
+        appFormRefs = tonumber(appStats.formRefCount) or 0,
+        appNodeItems = tonumber(appStats.currentNodeItems) or 0,
+        appFormBuilds = tonumber(appStats.formBuildCount) or 0,
+        appLuaTableCache = tonumber(appStats.luaTableCacheEntries) or 0,
+        appMaskCache = tonumber(appStats.maskCacheEntries) or 0,
+        appNodeSource = tostring(appStats.currentNodeSource or ""),
+        appHasNode = appStats.hasCurrentNode == true
+    }
+
+    pushHistory(self._memoryDebugHistory, snapshot, 12)
+    setSessionValues(self.session, {
+        memDebugLabel = snapshot.label,
+        memDebugLuaKB = snapshot.luaKB,
+        memDebugDeltaLuaKB = snapshot.deltaLuaKB,
+        memDebugPackageLoaded = snapshot.packageLoaded,
+        memDebugPackageLoadedApp = snapshot.packageLoadedApp,
+        memDebugCallbackQueued = snapshot.callbackQueued,
+        memDebugEventHandlers = snapshot.eventHandlers,
+        memDebugMspLoaded = snapshot.mspLoaded,
+        memDebugMspHelp = snapshot.mspHelp,
+        memDebugMspHelpMiss = snapshot.mspHelpMiss,
+        memDebugMspDataApis = snapshot.mspDataApis,
+        memDebugMspDataEntries = snapshot.mspDataEntries,
+        memDebugAppPathDepth = snapshot.appPathDepth,
+        memDebugAppFormRefs = snapshot.appFormRefs,
+        memDebugAppNodeItems = snapshot.appNodeItems,
+        memDebugAppFormBuilds = snapshot.appFormBuilds,
+        memDebugAppLuaTableCache = snapshot.appLuaTableCache,
+        memDebugAppMaskCache = snapshot.appMaskCache,
+        memDebugAppNodeSource = snapshot.appNodeSource
+    })
+
+    if self.log and self.log.info then
+        self.log:info(
+            "[mem] %s lua=%.1f d=%+.1f pkg=%d/%d cb=%d ev=%d/%d msp=%d/%d/%d refs=%d cache=%d mask=%d path=%d builds=%d",
+            snapshot.label,
+            snapshot.luaKB,
+            snapshot.deltaLuaKB,
+            snapshot.packageLoaded,
+            snapshot.packageLoadedApp,
+            snapshot.callbackQueued,
+            snapshot.eventNames,
+            snapshot.eventHandlers,
+            snapshot.mspLoaded,
+            snapshot.mspHelp,
+            snapshot.mspDataApis,
+            snapshot.appFormRefs,
+            snapshot.appLuaTableCache,
+            snapshot.appMaskCache,
+            snapshot.appPathDepth,
+            snapshot.appFormBuilds
+        )
+    end
+
+    return snapshot
 end
 
 function framework:printStats()

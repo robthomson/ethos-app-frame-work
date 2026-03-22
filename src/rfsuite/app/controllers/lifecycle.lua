@@ -127,10 +127,19 @@ function controller:deactivate()
         app.mspTask = nil
         app.rootLoadError = nil
     end
+    if app and app._clearMaskCache then
+        app:_clearMaskCache()
+    end
+    if app and app._clearLuaTableCache then
+        app:_clearLuaTableCache()
+    end
     if app and app._savePreferences then
         app:_savePreferences()
     end
     pcall(collectgarbage, "collect")
+    if app and app.framework and app.framework.captureMemoryDebug then
+        app.framework:captureMemoryDebug("app_deactivate")
+    end
     self:_sync()
 end
 

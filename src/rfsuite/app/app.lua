@@ -143,6 +143,20 @@ local SHARED_MASK_CACHE = {}
 local SHARED_MASK_CACHE_ORDER = {}
 local LUA_TABLE_CACHE = {}
 
+local function countTableEntries(tbl)
+    local count = 0
+
+    if type(tbl) ~= "table" then
+        return 0
+    end
+
+    for _ in pairs(tbl) do
+        count = count + 1
+    end
+
+    return count
+end
+
 local function unloadModuleIfLoaded(name)
     if type(name) ~= "string" or name == "" then
         return
@@ -437,6 +451,34 @@ function App:_syncLifecycleState(state)
     self.startupJob = lifecycleState.startupJob
     self.maintenanceScheduled = lifecycleState.maintenanceScheduled == true
     self.maintenancePhase = lifecycleState.maintenancePhase or 0
+end
+
+function App:getDebugStats()
+    local currentNode = self.currentNode
+    local currentItems = 0
+    local statusFields = countTableEntries(self.statusFields)
+    local valueFields = countTableEntries(self.valueFields)
+    local buttonFields = countTableEntries(self.buttonFields)
+    local navFields = countTableEntries(self.navFields)
+
+    if type(currentNode) == "table" and type(currentNode.items) == "table" then
+        currentItems = #currentNode.items
+    end
+
+    return {
+        pathDepth = type(self.pathStack) == "table" and #self.pathStack or 0,
+        currentNodeSource = self.currentNodeSource or "",
+        currentNodeItems = currentItems,
+        formRefCount = statusFields + valueFields + buttonFields + navFields + (self.headerTitleField ~= nil and 1 or 0),
+        statusFieldCount = statusFields,
+        valueFieldCount = valueFields,
+        buttonFieldCount = buttonFields,
+        navFieldCount = navFields,
+        formBuildCount = self.formBuildCount or 0,
+        luaTableCacheEntries = countTableEntries(LUA_TABLE_CACHE),
+        maskCacheEntries = countTableEntries(self.maskCache),
+        hasCurrentNode = currentNode ~= nil
+    }
 end
 
 function App:_invalidateForm()
