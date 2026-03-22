@@ -133,6 +133,14 @@ local function syncSensorMetadata(sensor, definition, moduleNumber)
     end
 end
 
+local function clearApiReadState(api)
+    if api and api.releaseTransientState then
+        api.releaseTransientState()
+    elseif api and api.clearReadData then
+        api.clearReadData()
+    end
+end
+
 function Provider.new(framework)
     return setmetatable({
         framework = framework,
@@ -399,6 +407,7 @@ function Provider:_queueApiRead(apiName, now, isArmed)
     api.setCompleteHandler(function()
         self.inFlightApiName = nil
         self:_applyApiFields(apiName, api)
+        clearApiReadState(api)
         if interval and interval > 0 then
             self.nextDue[apiName] = os.clock() + interval
         else
@@ -409,6 +418,7 @@ function Provider:_queueApiRead(apiName, now, isArmed)
         self.inFlightApiName = nil
         self.nextDue[apiName] = os.clock() + 1.0
         self.framework.log:warn("[msp-sensors] %s read failed: %s", apiName, tostring(errorMessage or "read_failed"))
+        clearApiReadState(api)
     end)
 
     queued, queueErr = api.read()
@@ -416,6 +426,7 @@ function Provider:_queueApiRead(apiName, now, isArmed)
         self.inFlightApiName = nil
         self.nextDue[apiName] = now + 1.0
         self.framework.log:warn("[msp-sensors] %s queue failed: %s", apiName, tostring(queueErr or "queue_failed"))
+        clearApiReadState(api)
         return false
     end
 

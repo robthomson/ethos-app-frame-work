@@ -33,6 +33,10 @@ local relinkFlexRows
 local function noopHandler()
 end
 
+local function keepApisLoaded(node)
+    return node and node.spec and node.spec.keepApisLoaded == true
+end
+
 local function copyTable(source)
     local out = {}
     local key
@@ -451,6 +455,66 @@ local function ensureApis(node)
     end
 
     return apiState
+end
+
+local function cleanupApiEntry(apiEntry)
+    local api = apiEntry and apiEntry.api or nil
+
+    if not api then
+        return
+    end
+
+    if api.releaseTransientState then
+        api.releaseTransientState()
+    end
+    if api.setCompleteHandler then
+        api.setCompleteHandler(noopHandler)
+    end
+    if api.setErrorHandler then
+        api.setErrorHandler(noopHandler)
+    end
+    if api.clearValues then
+        api.clearValues()
+    end
+    if api.resetWriteStatus then
+        api.resetWriteStatus()
+    end
+    if api.setUUID then
+        api.setUUID(nil)
+    end
+    if api.setTimeout then
+        api.setTimeout(nil)
+    end
+end
+
+local function releasePageApis(node, force)
+    local state = node and node.state or nil
+    local mspTask
+    local apiEntry
+
+    if type(state) ~= "table" or type(state.apis) ~= "table" then
+        return
+    end
+
+    if force ~= true and keepApisLoaded(node) == true then
+        return
+    end
+
+    mspTask = node.app and node.app.framework and node.app.framework:getTask("msp") or nil
+
+    for _, apiEntry in pairs(state.apis) do
+        cleanupApiEntry(apiEntry)
+    end
+
+    if mspTask and mspTask.api and mspTask.api.unload then
+        for _, apiEntry in pairs(state.apis) do
+            if apiEntry and apiEntry.spec and apiEntry.spec.name then
+                mspTask.api.unload(apiEntry.spec.name)
+            end
+        end
+    end
+
+    state.apis = {}
 end
 
 local function describeApiField(api, fieldName)
@@ -1310,6 +1374,7 @@ local function finishRead(node)
     node.state.resetDirtyAfterBuild = true
     updateDynamicTitle(node)
     refreshBuiltControls(node)
+    releasePageApis(node, false)
     if hasBuiltForm ~= true then
         node.app:_invalidateForm()
     end
@@ -1348,6 +1413,7 @@ local function failRead(node, reason)
     node.state.loading = false
     node.state.loaded = false
     node.state.error = tostring(reason or "read_failed")
+    releasePageApis(node, false)
     resumeDirtyAfterLoad(node, true)
     node.app.ui.clearProgressDialog(true)
     node.app:_invalidateForm()
@@ -1408,6 +1474,7 @@ local function triggerEepromWrite(node)
     local reason
 
     if node.spec.eepromWrite ~= true then
+        releasePageApis(node, false)
         node.state.saving = false
         node.state.error = nil
         if node.app.requestLoaderClose then
@@ -1419,12 +1486,15 @@ local function triggerEepromWrite(node)
     end
 
     if not mspTask or type(mspTask.queueCommand) ~= "function" then
+        releasePageApis(node, false)
         node.state.saving = false
         node.state.error = "eeprom_unavailable"
         node.app.ui.clearProgressDialog(true)
         node.app:_invalidateForm()
         return false
     end
+
+    releasePageApis(node, false)
 
     ok, reason = mspTask:queueCommand(250, {}, {
         timeout = 2.0,
@@ -1460,6 +1530,7 @@ end
 local function failWrite(node, reason)
     node.state.saving = false
     node.state.error = tostring(reason or "write_failed")
+    releasePageApis(node, false)
     node.app.ui.clearProgressDialog(true)
     node.app:_invalidateForm()
 end
@@ -1815,9 +1886,7 @@ function MspPage.create(spec)
         end
 
         function node:close()
-            local apiEntry
             local index
-            local mspTask = self.app and self.app.framework and self.app.framework:getTask("msp") or nil
 
             self.state.loading = false
             self.state.saving = false
@@ -1825,36 +1894,7 @@ function MspPage.create(spec)
             self.state.pendingLoaderCloseBuild = 0
             self.state.needsInitialLoad = false
 
-            for _, apiEntry in pairs(self.state.apis or {}) do
-                if apiEntry and apiEntry.api then
-                    if apiEntry.api.setCompleteHandler then
-                        apiEntry.api.setCompleteHandler(noopHandler)
-                    end
-                    if apiEntry.api.setErrorHandler then
-                        apiEntry.api.setErrorHandler(noopHandler)
-                    end
-                    if apiEntry.api.clearValues then
-                        apiEntry.api.clearValues()
-                    end
-                    if apiEntry.api.resetWriteStatus then
-                        apiEntry.api.resetWriteStatus()
-                    end
-                    if apiEntry.api.setUUID then
-                        apiEntry.api.setUUID(nil)
-                    end
-                    if apiEntry.api.setTimeout then
-                        apiEntry.api.setTimeout(nil)
-                    end
-                end
-            end
-
-            if mspTask and mspTask.api and mspTask.api.unload then
-                for _, apiEntry in pairs(self.state.apis or {}) do
-                    if apiEntry and apiEntry.spec and apiEntry.spec.name then
-                        mspTask.api.unload(apiEntry.spec.name)
-                    end
-                end
-            end
+            releasePageApis(self, true)
 
             for index = 1, #(self.state.fields or {}) do
                 if self.state.fields[index] then
@@ -1862,7 +1902,6 @@ function MspPage.create(spec)
                 end
             end
 
-            self.state.apis = {}
             self.state.fields = {}
             self.state.rows = {}
             self.state.labels = {}

@@ -308,6 +308,19 @@ function factory.create(spec)
         state.mspWriteComplete = false
     end
 
+    local function clearReadData()
+        state.mspData = nil
+    end
+
+    local function releaseTransientState()
+        state.mspData = nil
+        state.payloadData = {}
+        state.mspWriteComplete = false
+        state.uuid = nil
+        state.timeout = nil
+        state.rebuildOnWrite = (spec.initialRebuildOnWrite == true)
+    end
+
     local function setCompleteHandler(fn)
         if type(fn) ~= "function" then
             error("Complete handler requires function")
@@ -346,6 +359,8 @@ function factory.create(spec)
         setValue = setValue,
         clearValues = clearValues,
         resetWriteStatus = resetWriteStatus,
+        clearReadData = clearReadData,
+        releaseTransientState = releaseTransientState,
         setCompleteHandler = setCompleteHandler,
         setErrorHandler = setErrorHandler,
         setUUID = setUUID,

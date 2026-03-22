@@ -34,6 +34,18 @@ local function loadModule(moduleName)
     return result
 end
 
+local function unloadApi(mspTask, apiName, api)
+    if api and api.releaseTransientState then
+        api.releaseTransientState()
+    elseif api and api.clearReadData then
+        api.clearReadData()
+    end
+
+    if mspTask and mspTask.api and mspTask.api.unload then
+        mspTask.api.unload(apiName)
+    end
+end
+
 function SensorsTask:_resetTelemetryConfigBootstrap()
     self.telemetryConfigReadInFlight = false
     self.telemetryConfigReadRetryAt = 0
@@ -198,11 +210,13 @@ function SensorsTask:_primeTelemetryConfig(now)
         self.telemetryConfigReadInFlight = false
         self.telemetryConfigReadRetryAt = 0
         TelemetryConfig.applyApiToSession(session, api, self.framework.log)
+        unloadApi(mspTask, "TELEMETRY_CONFIG", api)
     end)
     api.setErrorHandler(function(_, errorMessage)
         self.telemetryConfigReadInFlight = false
         self.telemetryConfigReadRetryAt = os.clock() + 0.75
         self.framework.log:warn("[sensors] telemetry config read failed: %s", tostring(errorMessage or "read_failed"))
+        unloadApi(mspTask, "TELEMETRY_CONFIG", api)
     end)
 
     queued, queueErr = api.read()
@@ -210,6 +224,7 @@ function SensorsTask:_primeTelemetryConfig(now)
         self.telemetryConfigReadInFlight = false
         self.telemetryConfigReadRetryAt = now + 0.75
         self.framework.log:warn("[sensors] telemetry config queue failed: %s", tostring(queueErr or "queue_failed"))
+        unloadApi(mspTask, "TELEMETRY_CONFIG", api)
     end
 end
 
@@ -266,11 +281,13 @@ function SensorsTask:_primeBatteryConfig(now)
         self.batteryConfigReadInFlight = false
         self.batteryConfigReadRetryAt = 0
         BatteryConfig.applyApiToSession(session, api, self.framework.log)
+        unloadApi(mspTask, "BATTERY_CONFIG", api)
     end)
     api.setErrorHandler(function(_, errorMessage)
         self.batteryConfigReadInFlight = false
         self.batteryConfigReadRetryAt = os.clock() + 0.75
         self.framework.log:warn("[sensors] battery config read failed: %s", tostring(errorMessage or "read_failed"))
+        unloadApi(mspTask, "BATTERY_CONFIG", api)
     end)
 
     queued, queueErr = api.read()
@@ -278,6 +295,7 @@ function SensorsTask:_primeBatteryConfig(now)
         self.batteryConfigReadInFlight = false
         self.batteryConfigReadRetryAt = now + 0.75
         self.framework.log:warn("[sensors] battery config queue failed: %s", tostring(queueErr or "queue_failed"))
+        unloadApi(mspTask, "BATTERY_CONFIG", api)
     end
 end
 

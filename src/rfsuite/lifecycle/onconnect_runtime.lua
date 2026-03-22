@@ -60,6 +60,9 @@ local function createApiReadHook(spec)
                 started = false,
                 failed = false
             }
+            if context.msp and context.msp.api and context.msp.api.unload and spec.apiName then
+                context.msp.api.unload(spec.apiName)
+            end
             if spec.onReset then
                 spec.onReset(context)
             end
@@ -70,6 +73,17 @@ local function createApiReadHook(spec)
             local loadErr
             local ok
             local err
+            local function releaseApi()
+                if api and api.releaseTransientState then
+                    api.releaseTransientState()
+                elseif api and api.clearReadData then
+                    api.clearReadData()
+                end
+
+                if context.msp and context.msp.api and context.msp.api.unload and spec.apiName then
+                    context.msp.api.unload(spec.apiName)
+                end
+            end
 
             context.hook._apiState = state
 
@@ -104,17 +118,42 @@ local function createApiReadHook(spec)
             end
 
             api.setCompleteHandler(function()
+                local okComplete
+                local completeErr
+
                 if spec.onComplete then
-                    spec.onComplete(context, api)
+                    okComplete, completeErr = pcall(spec.onComplete, context, api)
+                    if not okComplete then
+                        state.failed = true
+                        context.framework.log:warn(
+                            "[lifecycle] onconnect hook '%s' API '%s' completion error: %s",
+                            spec.name,
+                            spec.apiName,
+                            tostring(completeErr)
+                        )
+                    end
                 end
+                releaseApi()
             end)
             api.setErrorHandler(function(_, errorMessage)
+                local okError
+                local errorErr
+
                 state.failed = true
                 if spec.onError then
-                    spec.onError(context, errorMessage)
+                    okError, errorErr = pcall(spec.onError, context, errorMessage)
+                    if not okError then
+                        context.framework.log:warn(
+                            "[lifecycle] onconnect hook '%s' API '%s' error handler failed: %s",
+                            spec.name,
+                            spec.apiName,
+                            tostring(errorErr)
+                        )
+                    end
                 else
                     context.framework.log:warn("[lifecycle] onconnect hook '%s' API '%s' error: %s", spec.name, spec.apiName, tostring(errorMessage))
                 end
+                releaseApi()
             end)
             if spec.uuid then
                 api.setUUID(spec.uuid)
@@ -127,6 +166,7 @@ local function createApiReadHook(spec)
             if not ok then
                 state.failed = true
                 context.framework.log:warn("[lifecycle] onconnect hook '%s' API '%s' queue error: %s", spec.name, spec.apiName, tostring(err))
+                releaseApi()
                 return true
             end
 
