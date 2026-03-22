@@ -78,4 +78,10 @@ function defaults.registerAll()
     defaults._registered = true
 end
 
+function defaults.releaseEvent(eventName)
+    if eventName == "onconnect" and onconnect and type(onconnect.releaseLoaded) == "function" then
+        onconnect.releaseLoaded()
+    end
+end
+
 return defaults

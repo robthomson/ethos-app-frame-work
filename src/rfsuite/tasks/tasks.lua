@@ -25,7 +25,14 @@ function tasks.wakeup()
 end
 
 function tasks.event(widget, category, value, x, y)
-    ethos_events.debug("tasks", category, value, x, y, {throttleSame = true})
+    local framework = runtime.ensureFramework()
+    local developer = framework and framework.preferences and framework.preferences:section("developer", {}) or {}
+
+    if developer.logevents == true or developer.logevents == "true" then
+        ethos_events.debug("tasks", category, value, x, y, {throttleSame = true, level = "info"})
+    else
+        ethos_events.debug("tasks", category, value, x, y, {throttleSame = true})
+    end
     return false
 end
 

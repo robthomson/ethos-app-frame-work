@@ -8,7 +8,6 @@
 ]] --
 
 local framework = require("framework.core.init")
-local App = require("app.app")
 local LoggerTask = require("tasks.logger")
 local MSPTask = require("tasks.msp")
 local LifecycleTask = require("tasks.lifecycle")
@@ -18,10 +17,12 @@ local SensorsTask = require("tasks.sensors")
 local TimerTask = require("tasks.timer")
 local AudioTask = require("tasks.audio")
 local LoggingTask = require("tasks.logging")
+local AppCleanupTask = require("tasks.app_cleanup")
 
 local runtime = {}
 runtime._backgroundStatusValues = {}
 runtime._backgroundStatusResult = {}
+runtime._appModuleCache = nil
 
 runtime.config = {
     toolName = "Rotorflight",
@@ -34,13 +35,18 @@ runtime.config = {
             debugMode = false,
             enableProfiling = false,
             iconsize = 1,
-            shortcuts_mixed_in = true
+            shortcuts_mixed_in = true,
+            save_confirm = true,
+            save_dirty_only = true,
+            save_armed_warning = true,
+            reload_confirm = false
         },
         developer = {
             memstats = false,
             taskprofiler = false,
             apiversion = 2,
             logmsp = false,
+            logevents = false,
             loglevel = "info",
             mspexpbytes = 8
         },
@@ -96,7 +102,7 @@ runtime.config = {
     bgTaskName = "Rotorflight [Background]",
     bgTaskKey = "rf2bg",
     developer = {
-        memstats = true,
+        memstats = false,
         taskprofiler = false,
         loglevel = "info",
         logMemoryStats = false,
@@ -109,11 +115,75 @@ runtime.config = {
     backgroundWatchdog = {
         staleAfter = 0.75,
         missingAfter = 3.0
+    },
+    app = {
+        idleCleanupDelay = 0.20
     }
 }
 
 runtime.icon = lcd and lcd.loadMask and lcd.loadMask("app/gfx/icon.png") or nil
 runtime.framework = framework
+
+local function loadLuaTable(path)
+    local chunk, loadErr
+    local ok, value
+
+    if type(path) ~= "string" or path == "" then
+        error("invalid module path")
+    end
+
+    chunk, loadErr = loadfile(path)
+    if not chunk then
+        error(tostring(loadErr or ("unable_to_load_" .. path)))
+    end
+
+    ok, value = pcall(chunk)
+    if not ok then
+        error(tostring(value))
+    end
+    if type(value) ~= "table" then
+        error("module did not return table: " .. tostring(path))
+    end
+
+    return value
+end
+
+local function loadAppModule()
+    if type(runtime._appModuleCache) == "table" then
+        return runtime._appModuleCache
+    end
+
+    local ok, module = pcall(require, "app.app")
+    if ok and type(module) == "table" then
+        runtime._appModuleCache = module
+        return module
+    end
+
+    module = loadLuaTable("app/app.lua")
+    runtime._appModuleCache = module
+    return module
+end
+
+local function unloadAppModules()
+    local loaded
+    local name
+
+    runtime._appModuleCache = nil
+
+    if not (package and type(package.loaded) == "table") then
+        return
+    end
+
+    loaded = package.loaded
+    for name in pairs(loaded) do
+        if type(name) == "string" and name:match("^app[%.]") then
+            loaded[name] = nil
+        end
+    end
+
+    pcall(collectgarbage, "collect")
+    pcall(collectgarbage, "collect")
+end
 
 local function seedSession(fw)
     fw.session:setMultiple({
@@ -126,6 +196,13 @@ local function seedSession(fw)
         backgroundState = fw.session:get("backgroundState", "waiting"),
         backgroundHealthy = fw.session:get("backgroundHealthy", false),
         backgroundAge = fw.session:get("backgroundAge", 0),
+        appResident = fw.session:get("appResident", false),
+        appInactiveAt = fw.session:get("appInactiveAt", 0),
+        appCleanupPending = fw.session:get("appCleanupPending", false),
+        appCleanupDueAt = fw.session:get("appCleanupDueAt", 0),
+        appCleanupLastAt = fw.session:get("appCleanupLastAt", 0),
+        appCleanupRuns = fw.session:get("appCleanupRuns", 0),
+        appCleanupReason = fw.session:get("appCleanupReason", "startup"),
         appWakeups = fw.session:get("appWakeups", 0),
         telemetryVoltage = fw.session:get("telemetryVoltage", 0),
         telemetryCurrent = fw.session:get("telemetryCurrent", 0),
@@ -266,7 +343,18 @@ function runtime.ensureFramework()
         enabled = true
     })
 
-    framework:registerApp(App)
+    framework:registerTask("app_cleanup", AppCleanupTask, {
+        priority = 6,
+        interval = 0.10,
+        enabled = true
+    })
+
+    framework:registerApp(nil, {
+        loader = loadAppModule,
+        unload = unloadAppModules,
+        unloadOnDeactivate = false,
+        releaseOnDeactivate = true
+    })
     seedSession(framework)
 
     framework.log:connect("Framework initialized")

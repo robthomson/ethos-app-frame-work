@@ -171,8 +171,8 @@ local function beginRead(node, message)
 
     node.app.ui.showLoader({
         kind = "progress",
-        title = "MSP Experimental",
-        message = message or "Loading experimental values.",
+        title = "@i18n(app.modules.msp_exp.name)@",
+        message = message or "@i18n(app.modules.msp_exp.loading_values)@",
         closeWhenIdle = true,
         modal = true
     })
@@ -217,7 +217,6 @@ local function beginSave(node)
         state.saving = false
         state.status = "Ready"
         node.app.ui.clearProgressDialog(true)
-        node.app:_invalidateForm()
     end)
     api.setErrorHandler(function(_, reasonText)
         state.saving = false
@@ -229,8 +228,8 @@ local function beginSave(node)
 
     node.app.ui.showLoader({
         kind = "save",
-        title = "MSP Experimental",
-        message = "Saving experimental values.",
+        title = "@i18n(app.modules.msp_exp.name)@",
+        message = "@i18n(app.modules.msp_exp.saving_values)@",
         closeWhenIdle = true,
         modal = true
     })
@@ -250,8 +249,8 @@ end
 
 function Page:open(ctx)
     local node = {
-        title = ctx.item.title or "MSP Experimental",
-        subtitle = ctx.item.subtitle or "MSP experimentation",
+        title = ctx.item.title or "@i18n(app.modules.msp_exp.name)@",
+        subtitle = ctx.item.subtitle or "@i18n(app.modules.msp_exp.subtitle)@",
         breadcrumb = ctx.breadcrumb,
         navButtons = {menu = true, save = true, reload = true, tool = false, help = false},
         app = ctx.app,
@@ -287,14 +286,14 @@ function Page:open(ctx)
         self.fields.uintFields = {}
 
         if self.state.error then
-            line = form.addLine("Status")
+            line = form.addLine("@i18n(app.modules.msp_exp.status_label)@")
             form.addStaticText(line, nil, tostring(self.state.error))
         elseif self.state.loaded ~= true then
-            line = form.addLine("Status")
-            form.addStaticText(line, nil, self.state.loading == true and "Loading..." or "Waiting...")
+            line = form.addLine("@i18n(app.modules.msp_exp.status_label)@")
+            form.addStaticText(line, nil, self.state.loading == true and "@i18n(app.modules.msp_exp.loading)@" or "@i18n(app.modules.msp_exp.waiting)@")
         elseif self.state.byteCount < 1 then
-            line = form.addLine("Status")
-            form.addStaticText(line, nil, "No experimental bytes returned.")
+            line = form.addLine("@i18n(app.modules.msp_exp.status_label)@")
+            form.addStaticText(line, nil, "@i18n(app.modules.msp_exp.no_bytes)@")
         end
 
         for i = 1, self.state.byteCount do
@@ -315,13 +314,13 @@ function Page:open(ctx)
 
     function node:reload(app)
         self.state.loaded = false
-        return beginRead(self, "Reloading experimental values.")
+        return beginRead(self, "@i18n(app.modules.msp_exp.reloading_values)@")
     end
 
     function node:wakeup(app)
         if self.state.needsInitialLoad == true and self.state.loading ~= true and self.state.loaded ~= true then
             self.state.needsInitialLoad = false
-            beginRead(self, "Loading experimental values.")
+            beginRead(self, "@i18n(app.modules.msp_exp.loading_values)@")
         end
     end
 

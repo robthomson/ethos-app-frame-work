@@ -86,6 +86,10 @@ function LifecycleTask:_finishCurrentRun(now)
     })
 
     self.currentRun = nil
+
+    if defaults and type(defaults.releaseEvent) == "function" then
+        defaults.releaseEvent(run.eventName)
+    end
 end
 
 function LifecycleTask:_failHook(run, hook, now, reason)

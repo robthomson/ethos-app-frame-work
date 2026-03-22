@@ -53,6 +53,10 @@ framework._taskMetadata = {}
 -- App management
 framework._app = nil
 framework._appModule = nil
+framework._appLoader = nil
+framework._appUnloader = nil
+framework._appUnloadOnDeactivate = false
+framework._appReleaseOnDeactivate = false
 framework._appActive = false
 
 -- State
@@ -60,6 +64,9 @@ framework._initialized = false
 framework._running = false
 framework._profiler = nil
 framework._profilerSessionBuffer = {}
+framework._profilerLastSyncAt = 0
+framework._profilerSessionInitialized = false
+framework._profilerSessionSyncInterval = 0.25
 framework._idleGcLastAt = 0
 framework._idleGcValues = {}
 framework._callbackWakeupOptions = {
@@ -95,6 +102,22 @@ function framework:_defaultPreferences()
     }
 end
 
+local function mergeTableOverrides(base, overrides)
+    local merged = {}
+    local key
+    local value
+
+    for key, value in pairs(base or {}) do
+        merged[key] = value
+    end
+
+    for key, value in pairs(overrides or {}) do
+        merged[key] = value
+    end
+
+    return merged
+end
+
 --[[ INITIALIZATION ]]
 
 function framework:init(config)
@@ -109,11 +132,15 @@ function framework:init(config)
         path = self.config.prefFile,
         defaults = self.config.preferencesDefaults or self:_defaultPreferences()
     })
+    self.config.developer = mergeTableOverrides(self.config.developer or {}, self.preferences:section("developer", {}))
     self.log:init({
-        developer = self.preferences.developer or {},
-        minLevel = (self.config.developer and self.config.developer.loglevel) or (self.preferences.developer and self.preferences.developer.loglevel) or "info"
+        developer = self.config.developer or {},
+        minLevel = (self.config.developer and self.config.developer.loglevel) or "info"
     })
     self._profiler = self.profiler.new(self.config.developer or {})
+    self._profilerLastSyncAt = 0
+    self._profilerSessionInitialized = false
+    self._profilerSessionSyncInterval = tonumber((self.config.developer or {}).profilerSessionSyncInterval) or 0.25
     self._idleGcLastAt = 0
     self._taskSchedulerOptions = {
         maxCriticalLoopMs = ((self.config.taskScheduler or {}).maxCriticalLoopMs) or 4,
@@ -126,12 +153,19 @@ function framework:init(config)
     self.session:set("initialized", true)
     self.session:set("appActive", false)
     self.session:setMultiple({
+        appResident = false,
+        appInactiveAt = 0,
+        appCleanupPending = false,
+        appCleanupDueAt = 0,
+        appCleanupLastAt = 0,
+        appCleanupRuns = 0,
+        appCleanupReason = "startup",
         idleGcEnabled = self.config.developer and self.config.developer.idleGcEnabled == true or false,
         idleGcLastAt = 0,
         idleGcCycleComplete = false,
         idleGcRuns = 0
     })
-    self:_syncProfilerSession()
+    self:_syncProfilerSession(true)
     
     return self
 end
@@ -140,9 +174,11 @@ function framework:_profileLog(line)
     self.log:info("%s", line)
 end
 
-function framework:_syncProfilerSession()
+function framework:_syncProfilerSession(force)
     local state = self._profiler
     local values = self._profilerSessionBuffer
+    local now = os.clock()
+    local syncInterval = tonumber(self._profilerSessionSyncInterval) or 0.25
     local loop = state and state.loop or nil
     local memory = state and state.memory or nil
     local taskCount = 0
@@ -150,6 +186,17 @@ function framework:_syncProfilerSession()
     local topTaskAvgMs = 0
     local topTaskLastMs = 0
     local topTaskMaxMs = 0
+    local enabled = state and state.enabled == true
+
+    if force ~= true then
+        if enabled ~= true then
+            if self._profilerSessionInitialized == true then
+                return
+            end
+        elseif syncInterval > 0 and (now - (self._profilerLastSyncAt or 0)) < syncInterval then
+            return
+        end
+    end
 
     if state and state.taskprofiler and state.tasks then
         local bestAvg = nil
@@ -186,7 +233,9 @@ function framework:_syncProfilerSession()
     values.topTaskLastMs = topTaskLastMs
     values.topTaskMaxMs = topTaskMaxMs
 
-    self.session:setMultiple(values)
+    self.session:setMultipleSilent(values)
+    self._profilerLastSyncAt = now
+    self._profilerSessionInitialized = true
 end
 
 function framework:_runIdleGc(now)
@@ -231,6 +280,10 @@ end
 function framework:registerApp(appModule, options)
     options = options or {}
     self._appModule = appModule
+    self._appLoader = options.loader
+    self._appUnloader = options.unload
+    self._appUnloadOnDeactivate = options.unloadOnDeactivate == true
+    self._appReleaseOnDeactivate = options.releaseOnDeactivate == true
     self._app = nil
     self.session:set("appRegistered", true)
 end
@@ -245,6 +298,18 @@ function framework:_createAppInstance()
     end
 
     local appModule = self._appModule
+    if type(appModule) ~= "table" then
+        if type(self._appLoader) == "function" then
+            local ok, loaded = pcall(self._appLoader, self)
+            if ok then
+                appModule = loaded
+            else
+                self.log:error("Failed to load app module: %s", tostring(loaded))
+                return nil
+            end
+        end
+    end
+
     if type(appModule) ~= "table" then
         return nil
     end
@@ -264,9 +329,17 @@ function framework:isAppActive()
 end
 
 function framework:activateApp()
+    local now = os.clock()
     self:_createAppInstance()
     self._appActive = true
-    self.session:set("appActive", true)
+    self.session:setMultipleSilent({
+        appActive = true,
+        appInactiveAt = 0,
+        appCleanupPending = false,
+        appCleanupDueAt = 0,
+        appCleanupReason = "active",
+        appResident = self._app ~= nil
+    })
     
     if self._app and self._app.onActivate then
         self._app:onActivate()
@@ -276,22 +349,66 @@ function framework:activateApp()
 end
 
 function framework:deactivateApp()
-    self._appActive = false
-    self.session:set("appActive", false)
-    
+    local now = os.clock()
+    local delay = tonumber(self.config.app and self.config.app.idleCleanupDelay) or 5.0
+    local shouldKeepResident = self._appUnloadOnDeactivate ~= true and self._appReleaseOnDeactivate ~= true and self._app ~= nil
+
     if self._app and self._app.onDeactivate then
         self._app:onDeactivate()
     end
+
+    self._appActive = false
+    self.session:setMultipleSilent({
+        appActive = false,
+        appInactiveAt = now,
+        appCleanupPending = shouldKeepResident,
+        appCleanupDueAt = shouldKeepResident and (now + math.max(0, delay)) or 0,
+        appCleanupReason = "deactivate"
+    })
     
     self:_emit("app:deactivated")
+
+    if self._appUnloadOnDeactivate == true then
+        if self._app and self._app.close then
+            pcall(self._app.close, self._app)
+        end
+        self._app = nil
+        if type(self._appUnloader) == "function" then
+            pcall(self._appUnloader, self)
+        end
+        self.session:set("appResident", false)
+        collectgarbage("collect")
+    elseif self._appReleaseOnDeactivate == true then
+        self._app = nil
+        self.session:set("appResident", false)
+        collectgarbage("collect")
+    else
+        self.session:set("appResident", self._app ~= nil)
+    end
+end
+
+function framework:releaseInactiveApp(reason)
+    if self._appActive == true then
+        return false
+    end
 
     if self._app and self._app.close then
         pcall(self._app.close, self._app)
     end
-
     self._app = nil
-    self.session:set("appResident", false)
+
+    if type(self._appUnloader) == "function" then
+        pcall(self._appUnloader, self)
+    end
+
+    self.session:setMultipleSilent({
+        appResident = false,
+        appCleanupPending = false,
+        appCleanupDueAt = 0,
+        appCleanupReason = reason or "release"
+    })
     collectgarbage("collect")
+    return true
 end
 
 --[[ TASK REGISTRATION & SCHEDULING ]]
@@ -508,12 +625,13 @@ function framework:wakeupTasks()
         return
     end
 
-    local loopToken = self._profiler and self.profiler:beginLoop(self._profiler) or nil
+    local profilerEnabled = self._profiler and self._profiler.enabled == true
+    local loopToken = profilerEnabled and self.profiler:beginLoop(self._profiler) or nil
     self:_wakeupTasks()
     self.callback:wakeup(self._callbackWakeupOptions)
     self:_runIdleGc(os.clock())
 
-    if self._profiler then
+    if profilerEnabled then
         self.profiler:endLoop(self._profiler, loopToken)
         self:_syncProfilerSession()
     end
@@ -617,6 +735,9 @@ function framework:close()
     end
     self._app = nil
     self._appModule = nil
+    self._appLoader = nil
+    self._appUnloader = nil
+    self._appUnloadOnDeactivate = false
     
     -- Clear callbacks and events
     self.callback:clearAll()

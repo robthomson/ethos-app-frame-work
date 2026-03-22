@@ -5,7 +5,8 @@
 
 local Page = {}
 
-local SHORTCUTS = assert(loadfile("app/lib/shortcuts.lua"))()
+local ModuleLoader = require("framework.utils.module_loader")
+local SHORTCUTS = ModuleLoader.loadFileCached("app/lib/shortcuts.lua")
 local GROUP_PREF_KEY = "settings_shortcuts_group"
 
 local function prefBool(value, default)
@@ -50,11 +51,11 @@ local function showLimitDialog(maxSelected)
 
     form.openDialog({
         width = nil,
-        title = "Shortcuts",
-        message = string.format("No more than %d shortcuts can be selected.", maxSelected),
+        title = "@i18n(app.modules.settings.shortcuts)@",
+        message = string.format("@i18n(app.modules.settings.shortcuts_limit)@", maxSelected),
         buttons = {
             {
-                label = "OK",
+                label = "@i18n(app.btn_ok)@",
                 action = function()
                     return true
                 end
@@ -90,8 +91,8 @@ function Page:open(ctx)
         groupIndex = tonumber(lastSelected[GROUP_PREF_KEY]) or 1
     }
     local node = {
-        title = ctx.item.title or "Shortcuts",
-        subtitle = ctx.item.subtitle or "Shortcut preferences",
+        title = ctx.item.title or "@i18n(app.modules.settings.shortcuts)@",
+        subtitle = ctx.item.subtitle or "@i18n(app.modules.settings.shortcuts_preferences)@",
         breadcrumb = ctx.breadcrumb,
         navButtons = {menu = true, save = true, reload = true, tool = false, help = false},
         state = state
@@ -113,7 +114,7 @@ function Page:open(ctx)
         local group = groups[self.state.groupIndex]
         local item
 
-        form.addBooleanField(form.addLine("Mixed In Mode"), nil,
+        form.addBooleanField(form.addLine("@i18n(app.modules.settings.shortcuts_mixed_in_mode)@"), nil,
             function()
                 return self.state.mixedIn == true
             end,
@@ -122,12 +123,12 @@ function Page:open(ctx)
             end)
 
         if #groups == 0 then
-            line = form.addLine("Status")
-            form.addStaticText(line, nil, "No shortcut pages available.")
+            line = form.addLine("@i18n(app.modules.settings.shortcuts_status_label)@")
+            form.addStaticText(line, nil, "@i18n(app.modules.settings.shortcuts_none)@")
             return
         end
 
-        form.addChoiceField(form.addLine("Group"), nil, groupChoices(groups),
+        form.addChoiceField(form.addLine("@i18n(app.modules.settings.shortcuts_group)@"), nil, groupChoices(groups),
             function()
                 return self.state.groupIndex
             end,
@@ -138,8 +139,8 @@ function Page:open(ctx)
             end)
 
         if not group then
-            line = form.addLine("Status")
-            form.addStaticText(line, nil, "No shortcut group selected.")
+            line = form.addLine("@i18n(app.modules.settings.shortcuts_status_label)@")
+            form.addStaticText(line, nil, "@i18n(app.modules.settings.shortcuts_group_selected_none)@")
             return
         end
 
@@ -167,10 +168,19 @@ function Page:open(ctx)
         local freshShortcuts = app.framework.preferences:section("shortcuts", {})
         local freshLastSelected = app.framework.preferences:section("menulastselected", {})
 
+        app.ui.showLoader({
+            kind = "progress",
+            title = self.title or "@i18n(app.modules.settings.shortcuts)@",
+            message = "Reloading settings.",
+            closeWhenIdle = false,
+            modal = true
+        })
+
         self.state.config = copyMap(freshShortcuts)
         self.state.mixedIn = prefBool(freshGeneral.shortcuts_mixed_in, true)
         self.state.groupIndex = tonumber(freshLastSelected[GROUP_PREF_KEY]) or 1
         app:_invalidateForm()
+        app.ui.clearProgressDialog(true)
         return true
     end
 
@@ -180,6 +190,14 @@ function Page:open(ctx)
         local selected = SHORTCUTS.limitSelectionMap(self.state.config, maxSelected)
         local key
         local item
+
+        app.ui.showLoader({
+            kind = "save",
+            title = self.title or "@i18n(app.modules.settings.shortcuts)@",
+            message = "Saving settings.",
+            closeWhenIdle = false,
+            modal = true
+        })
 
         generalSection.shortcuts_mixed_in = (self.state.mixedIn == true)
         lastSelected[GROUP_PREF_KEY] = self.state.groupIndex
@@ -195,6 +213,7 @@ function Page:open(ctx)
         end
 
         app.framework.preferences:save()
+        app.ui.clearProgressDialog(true)
         return true
     end
 

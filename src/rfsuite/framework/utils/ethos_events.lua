@@ -21,18 +21,26 @@ local KEY_NAMES = {}
 local TOUCH_NAMES = {}
 local CONSTANTS_BY_NAME = {}
 
+local function indexConstant(name, value)
+    if type(name) ~= "string" or type(value) ~= "number" then
+        return
+    end
+
+    if CONSTANTS_BY_NAME[name] == nil then
+        CONSTANTS_BY_NAME[name] = value
+    end
+    if (name:match("^KEY_") or name:match("^ROTARY_")) and KEY_NAMES[value] == nil then
+        KEY_NAMES[value] = name
+    elseif name:match("^TOUCH_") and TOUCH_NAMES[value] == nil then
+        TOUCH_NAMES[value] = name
+    elseif name:match("^EVT_") and EVT_NAMES[value] == nil then
+        EVT_NAMES[value] = name
+    end
+end
+
 for k, v in pairs(_G) do
     if type(v) == "number" then
-        if CONSTANTS_BY_NAME[k] == nil then
-            CONSTANTS_BY_NAME[k] = v
-        end
-        if (k:match("^KEY_") or k:match("^ROTARY_")) and KEY_NAMES[v] == nil then
-            KEY_NAMES[v] = k
-        elseif k:match("^TOUCH_") and TOUCH_NAMES[v] == nil then
-            TOUCH_NAMES[v] = k
-        elseif k:match("^EVT_") and EVT_NAMES[v] == nil then
-            EVT_NAMES[v] = k
-        end
+        indexConstant(k, v)
     end
 end
 
@@ -52,11 +60,24 @@ end
 local lastLine = nil
 
 function events.getConstant(name)
+    local value
+
     if type(name) ~= "string" or name == "" then
         return nil
     end
 
-    return CONSTANTS_BY_NAME[name]
+    value = CONSTANTS_BY_NAME[name]
+    if value ~= nil then
+        return value
+    end
+
+    value = rawget(_G, name)
+    if type(value) == "number" then
+        indexConstant(name, value)
+        return value
+    end
+
+    return nil
 end
 
 function events.matchesConstant(value, name)
@@ -80,6 +101,7 @@ end
 function events.isCloseEvent(category, value)
     return events.matchesConstant(category, "EVT_CLOSE")
         or events.matchesAnyConstant(value, {
+            "KEY_DOWN_BREAK",
             "KEY_RTN_BREAK",
             "KEY_EXIT_BREAK",
             "KEY_MODEL_BREAK"
@@ -88,6 +110,7 @@ end
 
 function events.debug(tag, category, value, x, y, options)
     options = options or {}
+    local level = options.level or "debug"
 
     if options.onlyKey and category ~= EVT_KEY then
         return
@@ -123,7 +146,15 @@ function events.debug(tag, category, value, x, y, options)
 
     lastLine = line
     if not options.returnOnly then
-        log:debug("%s", line)
+        if level == "info" then
+            log:info("%s", line)
+        elseif level == "warn" then
+            log:warn("%s", line)
+        elseif level == "error" then
+            log:error("%s", line)
+        else
+            log:debug("%s", line)
+        end
     end
 
     return line

@@ -32,6 +32,18 @@ local function toNumber(value, default)
     return number
 end
 
+local function unloadFlightStatsApi(mspTask, api)
+    if api and api.releaseTransientState then
+        api.releaseTransientState()
+    elseif api and api.clearReadData then
+        api.clearReadData()
+    end
+
+    if mspTask and mspTask.api and mspTask.api.unload then
+        mspTask.api.unload("FLIGHT_STATS")
+    end
+end
+
 function TimerTask:_ensureTimerState()
     local session = self.framework.session
     local timerState = session:get("timer", nil)
@@ -98,6 +110,8 @@ function TimerTask:_writeStats()
     local totalflighttime
     local flightcount
     local key
+    local queued
+    local queueErr
 
     if utils.apiVersionCompare(">=", {12, 0, 9}) ~= true or not prefs or not mspTask or not mspTask.api then
         return
@@ -122,20 +136,28 @@ function TimerTask:_writeStats()
     api.setValue("flightcount", flightcount)
     api.setCompleteHandler(function()
         self.framework.log:info("Synchronized flight stats to FBL")
+        unloadFlightStatsApi(mspTask, api)
         self:_saveToEeprom()
     end)
     api.setErrorHandler(function(_, errorMessage)
         self.framework.log:warn("[timer] FLIGHT_STATS write failed: %s", tostring(errorMessage or "write_failed"))
+        unloadFlightStatsApi(mspTask, api)
     end)
     api.setUUID("timer-flight-stats-write")
     api.setTimeout(3.0)
-    api.write()
+    queued, queueErr = api.write()
+    if queued ~= true then
+        self.framework.log:warn("[timer] FLIGHT_STATS write queue failed: %s", tostring(queueErr or "queue_failed"))
+        unloadFlightStatsApi(mspTask, api)
+    end
 end
 
 function TimerTask:_syncStatsToFbl()
     local mspTask = self.framework:getTask("msp")
     local api
     local loadErr
+    local queued
+    local queueErr
 
     if utils.apiVersionCompare(">=", {12, 0, 9}) ~= true or not mspTask or not mspTask.api then
         return
@@ -150,14 +172,20 @@ function TimerTask:_syncStatsToFbl()
     api.setCompleteHandler(function()
         local data = api.data and api.data() or nil
         self.readData = copyTable(data and data.parsed or {})
+        unloadFlightStatsApi(mspTask, api)
         self:_writeStats()
     end)
     api.setErrorHandler(function(_, errorMessage)
         self.framework.log:warn("[timer] FLIGHT_STATS read failed: %s", tostring(errorMessage or "read_failed"))
+        unloadFlightStatsApi(mspTask, api)
     end)
     api.setUUID("timer-flight-stats-read")
     api.setTimeout(3.0)
-    api.read()
+    queued, queueErr = api.read()
+    if queued ~= true then
+        self.framework.log:warn("[timer] FLIGHT_STATS read queue failed: %s", tostring(queueErr or "queue_failed"))
+        unloadFlightStatsApi(mspTask, api)
+    end
 end
 
 function TimerTask:_saveLocalTimers()

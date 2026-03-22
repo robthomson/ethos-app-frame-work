@@ -15,6 +15,7 @@ local mspRegistry = require("mspapi.registry")
 local mspApiCore = require("mspapi.core")
 local mspApiFactory = require("mspapi.factory")
 local utils = require("lib.utils")
+local MSP_STATUS_HOLD_SECONDS = 0.75
 local LIFECYCLE_ALIASES = {
     connected = "onconnect",
     disconnected = "ondisconnect",
@@ -148,6 +149,14 @@ function MSPTask:_clearLinkSession()
         isConnecting = false,
         mspBusy = false,
         mspQueueDepth = 0,
+        mspStatusMessage = nil,
+        mspStatusUpdatedAt = 0,
+        mspStatusLast = nil,
+        mspStatusClearAt = 0,
+        mspLastTxCommand = 0,
+        mspLastRxCommand = 0,
+        mspCrcErrors = 0,
+        mspTimeouts = 0,
         mspTransport = "disconnected",
         connectionTransport = "disconnected",
         mspProtocolVersion = self.framework.config.mspProtocolVersion or 1
@@ -236,6 +245,122 @@ function MSPTask:_logMspTraffic(kind, message, payload, extra)
             tostring(command),
             tostring(apiName or "-")
         )
+    end
+end
+
+function MSPTask:_formatTransferStatus(message, suffix)
+    local mode
+    local target
+    local command
+    local apiName
+    local text
+
+    if type(message) ~= "table" then
+        return nil
+    end
+
+    if message.isWrite ~= nil then
+        mode = message.isWrite == true and "Write" or "Read"
+    else
+        mode = (message.payload and #message.payload > 0) and "Write" or "Read"
+    end
+
+    command = message.command
+    apiName = message.apiName or message.apiname
+    target = apiName and tostring(apiName) or (command ~= nil and tostring(command) or nil)
+    text = "MSP " .. tostring(mode)
+
+    if target and target ~= "" then
+        text = text .. " " .. target
+    end
+    if apiName and command ~= nil and tostring(apiName) ~= tostring(command) then
+        text = text .. " (" .. tostring(command) .. ")"
+    end
+    if suffix and suffix ~= "" then
+        text = text .. " " .. suffix
+    end
+
+    return text
+end
+
+function MSPTask:_setTransferStatus(message, now)
+    local session = self.framework and self.framework.session
+    local stamp = now or os.clock()
+
+    if not session then
+        return
+    end
+
+    session:set("mspStatusMessage", message)
+    session:set("mspStatusUpdatedAt", stamp)
+    if message ~= nil and message ~= "" then
+        session:set("mspStatusLast", message)
+        session:set("mspStatusClearAt", 0)
+    end
+end
+
+function MSPTask:_holdTransferStatus(now)
+    local session = self.framework and self.framework.session
+
+    if not session then
+        return
+    end
+
+    if session:get("mspStatusMessage", nil) ~= nil or session:get("mspStatusLast", nil) ~= nil then
+        session:set("mspStatusClearAt", (now or os.clock()) + MSP_STATUS_HOLD_SECONDS)
+    end
+end
+
+function MSPTask:_updateTransferStatusHeartbeat(now, current, pending)
+    local retries
+    local suffix
+
+    if type(current) ~= "table" then
+        return
+    end
+
+    retries = self.queue and tonumber(self.queue.retryCount) or 0
+    if retries > 1 then
+        suffix = string.format("retry %d/%d", retries, ((self.queue and self.queue.maxRetries) or 0) + 1)
+    elseif retries > 0 then
+        suffix = "send"
+    elseif (tonumber(pending) or 0) > 1 then
+        suffix = string.format("queued (%d pending)", tonumber(pending) or 0)
+    else
+        suffix = "queued"
+    end
+
+    self:_setTransferStatus(self:_formatTransferStatus(current, suffix), now)
+end
+
+function MSPTask:_updateTransferStatusFromLog(kind, message, payload, extra)
+    local suffix = nil
+    local session = self.framework and self.framework.session
+
+    if kind == "tx" then
+        if session then
+            session:set("mspLastTxCommand", tonumber(message and message.command) or 0)
+        end
+        local retries = self.queue and tonumber(self.queue.retryCount) or 0
+        if retries > 1 then
+            suffix = string.format("retry %d/%d", retries, ((self.queue and self.queue.maxRetries) or 0) + 1)
+        else
+            suffix = "send"
+        end
+    elseif kind == "rx" then
+        if session then
+            session:set("mspLastRxCommand", tonumber(message and message.command) or 0)
+        end
+        suffix = extra == true and "error flag" or "ok"
+    elseif kind == "timeout" then
+        if session then
+            session:set("mspTimeouts", (tonumber(session:get("mspTimeouts", 0)) or 0) + 1)
+        end
+        suffix = tostring(extra or "timeout")
+    end
+
+    if suffix ~= nil then
+        self:_setTransferStatus(self:_formatTransferStatus(message, suffix), os.clock())
     end
 end
 
@@ -875,16 +1000,20 @@ function MSPTask:init(framework)
     self.lastProbeWaitReason = nil
     self.connectionToken = 0
     self.codec = codecFactory.new()
+    self._lastObservedCrcErrors = tonumber(self.codec and self.codec.crcErrorCount) or 0
     self.queue = queueFactory.new()
-    self.queue:setActivityHandler(function(_, now)
+    self.queue:setActivityHandler(function(_, now, current, pending)
         local sensorsTask = self.framework and self.framework.getTask and self.framework:getTask("sensors") or nil
         local mspSensorProvider = sensorsTask and sensorsTask.providers and sensorsTask.providers.msp or nil
 
         if mspSensorProvider and mspSensorProvider.busyHeartbeat then
             mspSensorProvider:busyHeartbeat(now)
         end
+
+        self:_updateTransferStatusHeartbeat(now, current, pending)
     end)
     self.queue:setLogHandler(function(_, kind, message, payload, extra)
+        self:_updateTransferStatusFromLog(kind, message, payload, extra)
         self:_logMspTraffic(kind, message, payload, extra)
     end)
     self.mspQueue = self.queue
@@ -901,6 +1030,14 @@ function MSPTask:init(framework)
         mspQueueDepth = 0,
         mspLastCommand = "idle",
         mspBusy = false,
+        mspStatusMessage = nil,
+        mspStatusUpdatedAt = 0,
+        mspStatusLast = nil,
+        mspStatusClearAt = 0,
+        mspLastTxCommand = 0,
+        mspLastRxCommand = 0,
+        mspCrcErrors = 0,
+        mspTimeouts = 0,
         mspTransport = "disconnected",
         mspProtocolVersion = self.framework.config.mspProtocolVersion or 1,
         apiProbeState = "idle",
@@ -953,6 +1090,20 @@ function MSPTask:wakeup()
     values.mspTransport = self.telemetryType or "disconnected"
     values.connectionTransport = self.telemetryType or "disconnected"
     self.framework.session:setMultiple(values)
+
+    if self.codec then
+        local crcErrors = tonumber(self.codec.crcErrorCount) or 0
+        if crcErrors ~= (self._lastObservedCrcErrors or 0) then
+            self._lastObservedCrcErrors = crcErrors
+            self.framework.session:set("mspCrcErrors", crcErrors)
+            self.framework.session:set("mspLastRxCommand", tonumber(self.codec.lastRxCommand) or 0)
+            self:_setTransferStatus("MSP CRC error (" .. tostring(crcErrors) .. ")", now)
+        end
+    end
+
+    if pending <= 0 and active ~= true then
+        self:_holdTransferStatus(now)
+    end
 end
 
 function MSPTask:queueCommand(cmd, payload, options)
@@ -1000,6 +1151,14 @@ function MSPTask:close()
         mspQueueDepth = 0,
         mspLastCommand = "closed",
         mspBusy = false,
+        mspStatusMessage = nil,
+        mspStatusUpdatedAt = 0,
+        mspStatusLast = nil,
+        mspStatusClearAt = 0,
+        mspLastTxCommand = 0,
+        mspLastRxCommand = 0,
+        mspCrcErrors = 0,
+        mspTimeouts = 0,
         mspTransport = "disconnected",
         telemetryType = "disconnected",
         telemetrySourcePresent = false,

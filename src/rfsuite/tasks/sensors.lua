@@ -3,17 +3,48 @@
   GPLv3 — https://www.gnu.org/licenses/gpl-3.0.en.html
 ]] --
 
-local SimProvider = require("sensors.providers.sim")
-local SmartProvider = require("sensors.providers.smart")
-local ElrsProvider = require("sensors.providers.elrs")
-local FrskyProvider = require("sensors.providers.frsky")
-local MspProvider = require("sensors.providers.msp")
 local TelemetryConfig = require("telemetry.config")
 local BatteryConfig = require("telemetry.battery")
+local ModuleLoader = require("framework.utils.module_loader")
 
 local SensorsTask = {}
 local SENSOR_LOST_MUTE_SECONDS = 10.0
 local SENSOR_LOST_REFRESH_SECONDS = 1.0
+local PROVIDER_MODULES = {
+    elrs = "sensors.providers.elrs",
+    frsky = "sensors.providers.frsky",
+    msp = "sensors.providers.msp",
+    sim = "sensors.providers.sim",
+    smart = "sensors.providers.smart"
+}
+local PROVIDER_FACTORIES = {}
+
+local function loadModule(moduleName)
+    local result
+    local path
+
+    result = PROVIDER_FACTORIES[moduleName]
+    if result ~= nil then
+        return result
+    end
+
+    path = string.gsub(moduleName, "%.", "/") .. ".lua"
+    result = ModuleLoader.requireOrLoad(moduleName, path)
+    PROVIDER_FACTORIES[moduleName] = result
+    return result
+end
+
+local function unloadApi(mspTask, apiName, api)
+    if api and api.releaseTransientState then
+        api.releaseTransientState()
+    elseif api and api.clearReadData then
+        api.clearReadData()
+    end
+
+    if mspTask and mspTask.api and mspTask.api.unload then
+        mspTask.api.unload(apiName)
+    end
+end
 
 function SensorsTask:_resetTelemetryConfigBootstrap()
     self.telemetryConfigReadInFlight = false
@@ -179,11 +210,13 @@ function SensorsTask:_primeTelemetryConfig(now)
         self.telemetryConfigReadInFlight = false
         self.telemetryConfigReadRetryAt = 0
         TelemetryConfig.applyApiToSession(session, api, self.framework.log)
+        unloadApi(mspTask, "TELEMETRY_CONFIG", api)
     end)
     api.setErrorHandler(function(_, errorMessage)
         self.telemetryConfigReadInFlight = false
         self.telemetryConfigReadRetryAt = os.clock() + 0.75
         self.framework.log:warn("[sensors] telemetry config read failed: %s", tostring(errorMessage or "read_failed"))
+        unloadApi(mspTask, "TELEMETRY_CONFIG", api)
     end)
 
     queued, queueErr = api.read()
@@ -191,6 +224,7 @@ function SensorsTask:_primeTelemetryConfig(now)
         self.telemetryConfigReadInFlight = false
         self.telemetryConfigReadRetryAt = now + 0.75
         self.framework.log:warn("[sensors] telemetry config queue failed: %s", tostring(queueErr or "queue_failed"))
+        unloadApi(mspTask, "TELEMETRY_CONFIG", api)
     end
 end
 
@@ -247,11 +281,13 @@ function SensorsTask:_primeBatteryConfig(now)
         self.batteryConfigReadInFlight = false
         self.batteryConfigReadRetryAt = 0
         BatteryConfig.applyApiToSession(session, api, self.framework.log)
+        unloadApi(mspTask, "BATTERY_CONFIG", api)
     end)
     api.setErrorHandler(function(_, errorMessage)
         self.batteryConfigReadInFlight = false
         self.batteryConfigReadRetryAt = os.clock() + 0.75
         self.framework.log:warn("[sensors] battery config read failed: %s", tostring(errorMessage or "read_failed"))
+        unloadApi(mspTask, "BATTERY_CONFIG", api)
     end)
 
     queued, queueErr = api.read()
@@ -259,6 +295,7 @@ function SensorsTask:_primeBatteryConfig(now)
         self.batteryConfigReadInFlight = false
         self.batteryConfigReadRetryAt = now + 0.75
         self.framework.log:warn("[sensors] battery config queue failed: %s", tostring(queueErr or "queue_failed"))
+        unloadApi(mspTask, "BATTERY_CONFIG", api)
     end
 end
 
@@ -278,6 +315,27 @@ function SensorsTask:_resetTransportProvider()
     self.transportProviderName = nil
 end
 
+function SensorsTask:_getProvider(name)
+    local provider
+    local moduleName
+    local factory
+
+    provider = self.providers[name]
+    if provider ~= nil then
+        return provider
+    end
+
+    moduleName = PROVIDER_MODULES[name]
+    if not moduleName then
+        return nil
+    end
+
+    factory = loadModule(moduleName)
+    provider = factory and factory.new and factory.new(self.framework) or nil
+    self.providers[name] = provider
+    return provider
+end
+
 function SensorsTask:_ensureTransportProvider()
     local name = self:_transportName()
 
@@ -286,13 +344,13 @@ function SensorsTask:_ensureTransportProvider()
     end
 
     if name == "sim" then
-        self.transportProvider = self.providers.sim
+        self.transportProvider = self:_getProvider("sim")
         self.transportProviderName = name
     elseif name == "crsf" then
-        self.transportProvider = self.providers.elrs
+        self.transportProvider = self:_getProvider("elrs")
         self.transportProviderName = name
     elseif name == "sport" then
-        self.transportProvider = self.providers.frsky
+        self.transportProvider = self:_getProvider("frsky")
         self.transportProviderName = name
     end
 
@@ -301,13 +359,7 @@ end
 
 function SensorsTask:init(framework)
     self.framework = framework
-    self.providers = {
-        elrs = ElrsProvider.new(framework),
-        frsky = FrskyProvider.new(framework),
-        msp = MspProvider.new(framework),
-        sim = SimProvider.new(framework),
-        smart = SmartProvider.new(framework)
-    }
+    self.providers = {}
     self.transportProvider = nil
     self.transportProviderName = nil
     self.wakeupTick = 0
@@ -321,10 +373,10 @@ function SensorsTask:init(framework)
         self:_resetBatteryConfigBootstrap()
         self:_armSensorLostMute(os.clock())
         BatteryConfig.clearSession(self.framework.session)
-        if self.providers.smart and self.providers.smart.reset then
+        if self:_getProvider("smart") and self.providers.smart.reset then
             self.providers.smart:reset()
         end
-        if self.providers.msp and self.providers.msp.reset then
+        if self:_getProvider("msp") and self.providers.msp.reset then
             self.providers.msp:reset()
         end
     end)
@@ -334,10 +386,10 @@ function SensorsTask:init(framework)
         self:_resetBatteryConfigBootstrap()
         self:_resetSensorLostMute()
         BatteryConfig.clearSession(self.framework.session)
-        if self.providers.smart and self.providers.smart.reset then
+        if self:_getProvider("smart") and self.providers.smart.reset then
             self.providers.smart:reset()
         end
-        if self.providers.msp and self.providers.msp.reset then
+        if self:_getProvider("msp") and self.providers.msp.reset then
             self.providers.msp:reset()
         end
     end)
@@ -348,19 +400,21 @@ end
 
 function SensorsTask:wakeup()
     local transportProvider = self:_ensureTransportProvider()
+    local mspProvider = self:_getProvider("msp")
+    local smartProvider = self:_getProvider("smart")
     local session = self.framework.session
     local now = os.clock()
     local phase
 
     self:_muteSensorLostDuringStartup(now)
-    if self.providers.msp and self.providers.msp.seedStartupPlaceholders then
-        self.providers.msp:seedStartupPlaceholders(now)
+    if mspProvider and mspProvider.seedStartupPlaceholders then
+        mspProvider:seedStartupPlaceholders(now)
     end
-    if self.providers.msp and self.providers.msp.refresh then
-        self.providers.msp:refresh(now)
+    if mspProvider and mspProvider.refresh then
+        mspProvider:refresh(now)
     end
-    if self.providers.smart and self.providers.smart.refresh then
-        self.providers.smart:refresh(now)
+    if smartProvider and smartProvider.refresh then
+        smartProvider:refresh(now)
     end
 
     if session:get("lifecycleActive", false) == true then
@@ -381,17 +435,17 @@ function SensorsTask:wakeup()
     self.wakeupTick = (self.wakeupTick or 0) + 1
     phase = self.wakeupTick % 2
 
-    if phase == 0 and self.providers.msp and self.providers.msp.wakeup then
-        self.providers.msp:wakeup()
+    if phase == 0 and mspProvider and mspProvider.wakeup then
+        mspProvider:wakeup()
     end
 
     if phase == 1
-        and self.providers.smart
-        and self.providers.smart.wakeup
+        and smartProvider
+        and smartProvider.wakeup
         and session:get("postConnectComplete", false) == true
         and type(session:get("batteryConfig", nil)) == "table"
     then
-        self.providers.smart:wakeup()
+        smartProvider:wakeup()
     end
 end
 
