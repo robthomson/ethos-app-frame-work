@@ -188,10 +188,6 @@ local function shouldCacheLoadedTable(path)
         return false
     end
 
-    if path:sub(1, 12) == "app/modules/" then
-        return false
-    end
-
     return true
 end
 
@@ -1719,9 +1715,6 @@ end
 
 function App:_closeNode(node)
     self:_runNodeHook(node, "close")
-    if type(node) == "table" and type(node.__modulePath) == "string" and node.__modulePath ~= "" then
-        clearLuaTableEntry(node.__modulePath)
-    end
     self:_releaseNodeMemory(node)
 end
 

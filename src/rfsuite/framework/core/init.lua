@@ -312,6 +312,10 @@ function framework:deactivateApp()
     local now = os.clock()
     local delay = tonumber(self.config.app and self.config.app.idleCleanupDelay) or 5.0
 
+    if self._app and self._app.onDeactivate then
+        self._app:onDeactivate()
+    end
+
     self._appActive = false
     self.session:setMultipleSilent({
         appActive = false,
@@ -320,10 +324,6 @@ function framework:deactivateApp()
         appCleanupDueAt = self._appUnloadOnDeactivate ~= true and self._app ~= nil and (now + math.max(0, delay)) or 0,
         appCleanupReason = "deactivate"
     })
-    
-    if self._app and self._app.onDeactivate then
-        self._app:onDeactivate()
-    end
     
     self:_emit("app:deactivated")
 

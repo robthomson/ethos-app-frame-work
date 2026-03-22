@@ -83,6 +83,7 @@ function controller:enterItem(index, item, breadcrumb)
     local app = self:_app()
     local key
     local opts
+    local previousNode
 
     if type(item) ~= "table" then
         return nil
@@ -95,6 +96,7 @@ function controller:enterItem(index, item, breadcrumb)
         source = self.state.currentNodeSource,
         breadcrumb = self.state.currentNode and self.state.currentNode.breadcrumb or nil
     }
+    previousNode = self.state.currentNode
 
     if item.kind == "page" and app and app.showLoader then
         app:showLoader({
@@ -106,6 +108,11 @@ function controller:enterItem(index, item, breadcrumb)
             modal = true
         })
     end
+
+    if app and app._closeNode then
+        app:_closeNode(previousNode)
+    end
+    self.state.currentNode = nil
 
     if item.kind == "menu" and type(item.source) == "string" then
         self.state.currentNodeSource = item.source
