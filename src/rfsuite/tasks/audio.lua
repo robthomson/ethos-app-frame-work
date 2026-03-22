@@ -4,6 +4,7 @@
 ]] --
 
 local AudioLib = require("lib.audio")
+local ModuleLoader = require("framework.utils.module_loader")
 
 local AudioTask = {}
 
@@ -33,86 +34,8 @@ local GOVERNOR_FILES = {
     [101] = "disarmed.wav"
 }
 
-local ADJ_WAVS = {
-    [5] = "pitch rate",
-    [6] = "roll rate",
-    [7] = "yaw rate",
-    [8] = "pitch rc rate",
-    [9] = "roll rc rate",
-    [10] = "yaw rc rate",
-    [11] = "pitch rc expo",
-    [12] = "roll rc expo",
-    [13] = "yaw rc expo",
-    [14] = "pitch p gain",
-    [15] = "pitch i gain",
-    [16] = "pitch d gain",
-    [17] = "pitch f gain",
-    [18] = "roll p gain",
-    [19] = "roll i gain",
-    [20] = "roll d gain",
-    [21] = "roll f gain",
-    [22] = "yaw p gain",
-    [23] = "yaw i gain",
-    [24] = "yaw d gain",
-    [25] = "yaw f gain",
-    [26] = "yaw cw gain",
-    [27] = "yaw ccw gain",
-    [28] = "yaw cyclic ff",
-    [29] = "yaw collective ff",
-    [30] = "yaw collective dyn",
-    [31] = "yaw collective decay",
-    [32] = "pitch collective ff",
-    [33] = "pitch gyro cutoff",
-    [34] = "roll gyro cutoff",
-    [35] = "yaw gyro cutoff",
-    [36] = "pitch dterm cutoff",
-    [37] = "roll dterm cutoff",
-    [38] = "yaw dterm cutoff",
-    [39] = "rescue climb collective",
-    [40] = "rescue hover collective",
-    [41] = "rescue hover alt",
-    [42] = "rescue alt p gain",
-    [43] = "rescue alt i gain",
-    [44] = "rescue alt d gain",
-    [45] = "angle level gain",
-    [46] = "horizon level gain",
-    [47] = "acro gain",
-    [48] = "gov gain",
-    [49] = "gov p gain",
-    [50] = "gov i gain",
-    [51] = "gov d gain",
-    [52] = "gov f gain",
-    [53] = "gov tta gain",
-    [54] = "gov cyclic ff",
-    [55] = "gov collective ff",
-    [56] = "pitch b gain",
-    [57] = "roll b gain",
-    [58] = "yaw b gain",
-    [59] = "pitch o gain",
-    [60] = "roll o gain",
-    [61] = "crossc gain",
-    [62] = "crossc ratio",
-    [63] = "crossc cutoff",
-    [64] = "acc pitch trim",
-    [65] = "acc roll trim",
-    [66] = "yaw inertia precomp gain",
-    [67] = "yaw inertia precomp cutoff",
-    [68] = "pitch setpoint boost gain",
-    [69] = "roll setpoint boost gain",
-    [70] = "yaw setpoint boost gain",
-    [71] = "collective setpoint boost gain",
-    [72] = "yaw dyn ceiling gain",
-    [73] = "yaw dyn deadband gain",
-    [74] = "yaw dyn deadband filter",
-    [75] = "yaw precomp cutoff",
-    [76] = "gov idle throttle",
-    [77] = "gov auto throttle",
-    [78] = "gov max throttle",
-    [79] = "gov min throttle",
-    [80] = "gov headspeed",
-    [81] = "gov yaw ff",
-    [82] = "battery profile"
-}
+local ADJUSTMENT_MODULE_NAME = "tasks.audio_adjustments"
+local ADJUSTMENT_MODULE_PATH = "tasks/audio_adjustments.lua"
 
 local DEFAULT_EVENT_PREFS = {
     armflags = true,
@@ -304,8 +227,28 @@ function AudioTask:_playPackageFiles(pkg, files, now)
     return true
 end
 
+function AudioTask:_loadAdjustmentWavs()
+    if type(self._adjustmentWavs) == "table" then
+        return self._adjustmentWavs
+    end
+
+    self._adjustmentWavs = ModuleLoader.requireOrLoad(ADJUSTMENT_MODULE_NAME, ADJUSTMENT_MODULE_PATH)
+    return self._adjustmentWavs
+end
+
+function AudioTask:_releaseAdjustmentResources()
+    self._adjustmentFileCache = nil
+    self.missingAdjAudio = nil
+    self._adjustmentWavs = nil
+    ModuleLoader.clear(ADJUSTMENT_MODULE_NAME, ADJUSTMENT_MODULE_PATH)
+    if package and type(package.loaded) == "table" then
+        package.loaded[ADJUSTMENT_MODULE_NAME] = nil
+    end
+end
+
 function AudioTask:_adjustmentFiles(adjFunc)
-    local wavs = ADJ_WAVS[adjFunc]
+    local wavsMap = self:_loadAdjustmentWavs()
+    local wavs = wavsMap and wavsMap[adjFunc]
     local files
     local resolved
     local missing
@@ -486,6 +429,10 @@ function AudioTask:_handleAdjustmentCallouts(now)
     local hasBaseline
 
     if not telemetry or not telemetry.getSensor then
+        return
+    end
+
+    if eventsPrefs.adj_f ~= true and eventsPrefs.adj_v ~= true then
         return
     end
 
@@ -674,6 +621,7 @@ function AudioTask:init(framework)
     self.lastBeepTimer = nil
     self.timerTriggered = false
     self.pendingConnectBeep = false
+    self._adjustmentWavs = nil
 
     framework.preferences:section("events", DEFAULT_EVENT_PREFS)
     framework.preferences:section("timer", DEFAULT_TIMER_PREFS)
@@ -735,9 +683,11 @@ function AudioTask:reset()
     self.timerTriggered = false
     self.pendingConnectBeep = false
     self.startedAt = os.clock()
+    self:_releaseAdjustmentResources()
 end
 
 function AudioTask:close()
+    self:_releaseAdjustmentResources()
     self.framework = nil
 end
 
