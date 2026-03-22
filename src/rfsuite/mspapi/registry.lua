@@ -4,6 +4,7 @@
 ]] --
 
 local framework = require("framework.core.init")
+local helpCatalog = require("mspapi.help_catalog")
 
 local api = {
     loaded = {},
@@ -42,6 +43,56 @@ local function loadDefinitionFromPath(name)
     return moduleOrErr
 end
 
+local function loadHelp(name)
+    if type(name) ~= "string" or name == "" then
+        return nil
+    end
+
+    if type(helpCatalog) == "table" and type(helpCatalog.get) == "function" then
+        return helpCatalog.get(name)
+    end
+
+    return nil
+end
+
+local function injectHelpIntoStructure(name, structure)
+    local helpFields = loadHelp(name)
+    local index
+    local entry
+    local bitIndex
+    local bit
+    local fieldName
+    local bitName
+    local composite
+
+    if type(helpFields) ~= "table" or type(structure) ~= "table" then
+        return
+    end
+
+    for index = 1, #structure do
+        entry = structure[index]
+        if type(entry) == "table" then
+            fieldName = entry.field
+            if entry.help == nil and type(fieldName) == "string" then
+                entry.help = helpFields[fieldName]
+            end
+
+            if type(entry.bitmap) == "table" then
+                for bitIndex = 1, #entry.bitmap do
+                    bit = entry.bitmap[bitIndex]
+                    if type(bit) == "table" then
+                        bitName = bit.field
+                        if bit.help == nil and type(bitName) == "string" then
+                            composite = type(fieldName) == "string" and (fieldName .. "->" .. bitName) or nil
+                            bit.help = (composite and helpFields[composite]) or helpFields[bitName]
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 function api.load(name)
     local ok
     local moduleOrErr
@@ -62,6 +113,12 @@ function api.load(name)
             moduleOrErr = pathModule
         end
         api.loaded[name] = moduleOrErr
+        if type(moduleOrErr) == "table" then
+            injectHelpIntoStructure(name, moduleOrErr.__rfReadStructure)
+            if moduleOrErr.__rfWriteStructure ~= moduleOrErr.__rfReadStructure then
+                injectHelpIntoStructure(name, moduleOrErr.__rfWriteStructure)
+            end
+        end
     end
 
     return api.loaded[name]

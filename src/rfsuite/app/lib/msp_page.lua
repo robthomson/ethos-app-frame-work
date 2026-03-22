@@ -10,6 +10,25 @@ local MspPage = {}
 local FIELD_TYPE_CHOICE = 1
 local DEFAULT_INLINE_SIZE = 13.6
 local DEFAULT_NAV = {menu = true, save = true, reload = true, tool = false, help = false}
+local MATRIX_FIELD_INHERIT_KEYS = {
+    "type",
+    "table",
+    "tableEthos",
+    "values",
+    "tableIdxInc",
+    "decimals",
+    "step",
+    "prefix",
+    "suffix",
+    "unit",
+    "min",
+    "max",
+    "default",
+    "scale",
+    "offset",
+    "mult",
+    "help"
+}
 local relinkFlexRows
 local function noopHandler()
 end
@@ -434,11 +453,45 @@ local function ensureApis(node)
     return apiState
 end
 
+local function describeApiField(api, fieldName)
+    local data
+    local structure
+    local index
+    local field
+
+    if type(fieldName) ~= "string" or fieldName == "" or type(api) ~= "table" then
+        return nil
+    end
+
+    if type(api.describeField) == "function" then
+        return api.describeField(fieldName)
+    end
+
+    if type(api.data) ~= "function" then
+        return nil
+    end
+
+    data = api.data()
+    structure = data and data.structure or nil
+    if type(structure) ~= "table" then
+        return nil
+    end
+
+    for index = 1, #structure do
+        field = structure[index]
+        if type(field) == "table" and field.field == fieldName then
+            return field
+        end
+    end
+
+    return nil
+end
+
 local function mergedField(node, fieldSpec)
     local apiName = fieldSpec.api or fieldSpec.apiName or node.state.defaultApiName
     local apiEntry = apiName and node.state.apis[apiName] or nil
     local api = apiEntry and apiEntry.api or nil
-    local meta = api and api.describeField and api.describeField(fieldSpec.apikey) or nil
+    local meta = describeApiField(api, fieldSpec.apikey)
     local merged = {}
     local rawValue
     local key
@@ -902,6 +955,39 @@ local function matrixFieldLookup(fields)
     return lookup
 end
 
+local function inheritMissingFieldValues(target, source)
+    local index
+    local key
+
+    if type(target) ~= "table" or type(source) ~= "table" then
+        return target
+    end
+
+    for index = 1, #MATRIX_FIELD_INHERIT_KEYS do
+        key = MATRIX_FIELD_INHERIT_KEYS[index]
+        if target[key] == nil and source[key] ~= nil then
+            target[key] = source[key]
+        end
+    end
+
+    return target
+end
+
+local function hydrateMatrixField(node, field, row, column)
+    local layout = node and node.spec and node.spec.layout or nil
+
+    if type(field) ~= "table" then
+        return field
+    end
+
+    inheritMissingFieldValues(field, layout and layout.fieldDefaults or nil)
+    inheritMissingFieldValues(field, layout)
+    inheritMissingFieldValues(field, row)
+    inheritMissingFieldValues(field, column)
+
+    return field
+end
+
 local function matrixMetrics(node, app, columns)
     local width = app:_windowSize()
     local gap = resolveDimension(node.spec.layout and node.spec.layout.slotGap, width) or 10
@@ -996,6 +1082,7 @@ local function buildMatrixRow(line, node, app, row, columns, rowFields)
         column = columns[index]
         field = rowFields and rowFields[matrixColumnKey(column, index)] or nil
         if field then
+            hydrateMatrixField(node, field, row, column)
             cellX = metrics.blockX + ((index - 1) * (metrics.cellW + metrics.gap))
             controlW = resolveDimension(field.fieldWidth or column.fieldWidth or (node.spec.layout and node.spec.layout.fieldWidth), metrics.cellW) or metrics.cellW
             controlW = math.max(0, math.min(metrics.cellW, controlW))

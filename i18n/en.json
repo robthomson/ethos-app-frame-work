@@ -2008,6 +2008,24 @@
         "max_length": 52,
         "needs_translation": false,
         "translation": "Frequency limit for all yaw precompensation actions."
+      },
+      "pid_mode": {
+        "english": "Selects the PID controller mode used by the active profile.",
+        "max_length": 59,
+        "needs_translation": false,
+        "translation": "Selects the PID controller mode used by the active profile."
+      },
+      "error_decay_time_yaw": {
+        "english": "Time constant for bleeding off yaw I-term. Higher will hold heading stronger, lower will release faster.",
+        "max_length": 104,
+        "needs_translation": false,
+        "translation": "Time constant for bleeding off yaw I-term. Higher will hold heading stronger, lower will release faster."
+      },
+      "error_decay_limit_yaw": {
+        "english": "Maximum bleed-off speed for yaw I-term.",
+        "max_length": 39,
+        "needs_translation": false,
+        "translation": "Maximum bleed-off speed for yaw I-term."
       }
     },
     "PID_TUNING": {
@@ -7551,92 +7569,6 @@
           "translation": "Y"
         },
         "yaw_full": {
-          "english": "Yaw",
-          "max_length": 3,
-          "needs_translation": false,
-          "translation": "Yaw"
-        }
-      },
-      "pids": {
-        "b": {
-          "english": "B",
-          "max_length": 1,
-          "needs_translation": false,
-          "translation": "B"
-        },
-        "d": {
-          "english": "D",
-          "max_length": 1,
-          "needs_translation": false,
-          "translation": "D"
-        },
-        "f": {
-          "english": "FF",
-          "max_length": 2,
-          "needs_translation": false,
-          "translation": "FF"
-        },
-        "help_p1": {
-          "english": "FeedForward (Roll/Pitch): Start at 70, increase until stops are sharp with no drift. Keep roll and pitch equal.",
-          "max_length": 111,
-          "needs_translation": false,
-          "translation": "FeedForward (Roll/Pitch): Start at 70, increase until stops are sharp with no drift. Keep roll and pitch equal."
-        },
-        "help_p2": {
-          "english": "I Gain (Roll/Pitch): Raise gradually for stable piro pitch pumps. Too high causes wobbles; match roll/pitch values.",
-          "max_length": 115,
-          "needs_translation": false,
-          "translation": "I Gain (Roll/Pitch): Raise gradually for stable piro pitch pumps. Too high causes wobbles; match roll/pitch values."
-        },
-        "help_p3": {
-          "english": "Tail P/I/D Gains: Increase P until slight wobble in funnels, then back off slightly. Raise I until tail holds firm in hard moves (too high causes slow wag). Adjust D for smooth stops-higher for slow servos, lower for fast ones.",
-          "max_length": 227,
-          "needs_translation": false,
-          "translation": "Tail P/I/D Gains: Increase P until slight wobble in funnels, then back off slightly. Raise I until tail holds firm in hard moves (too high causes slow wag). Adjust D for smooth stops-higher for slow servos, lower for fast ones."
-        },
-        "help_p4": {
-          "english": "Test & Adjust: Fly, observe, and fine-tune for best performance in real conditions.",
-          "max_length": 83,
-          "needs_translation": false,
-          "translation": "Test & Adjust: Fly, observe, and fine-tune for best performance in real conditions."
-        },
-        "i": {
-          "english": "I",
-          "max_length": 1,
-          "needs_translation": false,
-          "translation": "I"
-        },
-        "name": {
-          "english": "PIDs",
-          "max_length": 4,
-          "needs_translation": false,
-          "translation": "PIDs"
-        },
-        "o": {
-          "english": "O",
-          "max_length": 1,
-          "needs_translation": false,
-          "translation": "O"
-        },
-        "p": {
-          "english": "P",
-          "max_length": 1,
-          "needs_translation": false,
-          "translation": "P"
-        },
-        "pitch": {
-          "english": "Pitch",
-          "max_length": 5,
-          "needs_translation": false,
-          "translation": "Pitch"
-        },
-        "roll": {
-          "english": "Roll",
-          "max_length": 4,
-          "needs_translation": false,
-          "translation": "Roll"
-        },
-        "yaw": {
           "english": "Yaw",
           "max_length": 3,
           "needs_translation": false,
