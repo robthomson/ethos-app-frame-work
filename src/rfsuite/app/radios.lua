@@ -21,7 +21,16 @@ local supportedRadios = {
         inlinesize_mult = 1,
         linePaddingTop = 8,
         menuButtonWidth = 100,
-        navbuttonHeight = 40
+        navbuttonHeight = 40,
+        logGraphButtonsPerRow = 5,
+        logGraphHeightOffset = -15,
+        logGraphKeyHeight = 65,
+        logGraphMenuOffset = 70,
+        logGraphWidthPercentage = 0.77,
+        logKeyFont = FONT_S,
+        logKeyFontSmall = FONT_XS,
+        logShowAvg = true,
+        logSliderPaddingLeft = 42
     },
     ["472x288"] = {
         buttonWidth = 110,
@@ -35,7 +44,17 @@ local supportedRadios = {
         inlinesize_mult = 1.28,
         linePaddingTop = 6,
         menuButtonWidth = 60,
-        navbuttonHeight = 30
+        navbuttonHeight = 30,
+        navButtonOffset = 47,
+        logGraphButtonsPerRow = 4,
+        logGraphHeightOffset = 10,
+        logGraphKeyHeight = 45,
+        logGraphMenuOffset = 55,
+        logGraphWidthPercentage = 0.70,
+        logKeyFont = FONT_XS,
+        logKeyFontSmall = FONT_XXS,
+        logShowAvg = false,
+        logSliderPaddingLeft = 30
     },
     ["632x314"] = {
         buttonWidth = 118,
@@ -49,7 +68,17 @@ local supportedRadios = {
         inlinesize_mult = 1.11,
         linePaddingTop = 6,
         menuButtonWidth = 80,
-        navbuttonHeight = 35
+        navbuttonHeight = 35,
+        navButtonOffset = 47,
+        logGraphButtonsPerRow = 4,
+        logGraphHeightOffset = 0,
+        logGraphKeyHeight = 50,
+        logGraphMenuOffset = 60,
+        logGraphWidthPercentage = 0.74,
+        logKeyFont = FONT_XXS,
+        logKeyFontSmall = FONT_XXS,
+        logShowAvg = false,
+        logSliderPaddingLeft = 30
     }
 }
 

@@ -94,7 +94,8 @@ function controller:enterItem(index, item, breadcrumb)
     end
     self.state.pathStack[#self.state.pathStack + 1] = {
         source = self.state.currentNodeSource,
-        breadcrumb = self.state.currentNode and self.state.currentNode.breadcrumb or nil
+        breadcrumb = self.state.currentNode and self.state.currentNode.breadcrumb or nil,
+        item = self.state.currentNode and self.state.currentNode.__item or nil
     }
     previousNode = self.state.currentNode
 
@@ -169,6 +170,8 @@ function controller:goBack()
     self.state.currentNodeSource = previous.source
     if previous.source == self.menuRootPath then
         self.state.currentNode = app and app._loadRootNode and app:_loadRootNode() or nil
+    elseif type(previous.item) == "table" and type(previous.source) == "string" and previous.source:sub(1, 5) == "page:" then
+        self.state.currentNode = app and app._loadPageNode and app:_loadPageNode(previous.item, previous.breadcrumb) or nil
     else
         self.state.currentNode = app and app._loadNodeFromSource and app:_loadNodeFromSource(previous.source) or nil
         if type(self.state.currentNode) == "table" then

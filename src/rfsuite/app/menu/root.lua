@@ -52,8 +52,7 @@ return {
             image = "app/modules/logs/gfx/logs.png",
             offline = true,
             group = "system",
-            groupTitle = "System",
-            status = "Scaffold"
+            groupTitle = "System"
         },
         {
             id = "settings_admin",

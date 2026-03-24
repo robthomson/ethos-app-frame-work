@@ -1774,6 +1774,7 @@ function App:_releaseNodeMemory(node)
     node.help = nil
     node.canSave = nil
     node.__modulePath = nil
+    node.__item = nil
     node.close = nil
 end
 
@@ -1879,6 +1880,7 @@ function App:_loadPageNode(item, breadcrumb)
         node.navButtons = {menu = true, save = false, reload = false, tool = false, help = false}
     end
     node.__modulePath = modulePath
+    node.__item = cloneTable(item)
     if self:_shouldManageDirtySave(node) and type(node.canSave) ~= "function" then
         node.canSave = function()
             return self.pageDirty == true
