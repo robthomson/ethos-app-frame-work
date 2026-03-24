@@ -3942,6 +3942,12 @@
         }
       },
       "copyprofiles": {
+        "copy_failed": {
+          "english": "Copy request failed.",
+          "max_length": 20,
+          "needs_translation": false,
+          "translation": "Copy request failed."
+        },
         "dest_profile": {
           "english": "Dest. Profile",
           "max_length": 13,
@@ -3996,11 +4002,23 @@
           "needs_translation": false,
           "translation": "Rate"
         },
+        "same_profile": {
+          "english": "Source and destination profiles are the same.",
+          "max_length": 45,
+          "needs_translation": false,
+          "translation": "Source and destination profiles are the same."
+        },
         "source_profile": {
           "english": "Source Profile",
           "max_length": 14,
           "needs_translation": false,
           "translation": "Source Profile"
+        },
+        "subtitle": {
+          "english": "Copy PID or rate profiles",
+          "max_length": 25,
+          "needs_translation": false,
+          "translation": "Copy PID or rate profiles"
         }
       },
       "diagnostics": {
@@ -7928,6 +7946,12 @@
           "needs_translation": false,
           "translation": "Select Profile"
         },
+        "load_failed": {
+          "english": "Failed to load current profile selection.",
+          "max_length": 41,
+          "needs_translation": false,
+          "translation": "Failed to load current profile selection."
+        },
         "ok": {
           "english": "OK",
           "max_length": 2,
@@ -7963,6 +7987,18 @@
           "max_length": 13,
           "needs_translation": false,
           "translation": "Save settings"
+        },
+        "save_failed": {
+          "english": "Profile selection request failed.",
+          "max_length": 33,
+          "needs_translation": false,
+          "translation": "Profile selection request failed."
+        },
+        "subtitle": {
+          "english": "Switch active profiles",
+          "max_length": 22,
+          "needs_translation": false,
+          "translation": "Switch active profiles"
         }
       },
       "profile_tailrotor": {
