@@ -293,8 +293,10 @@ local function drawKey(app, layout, laneData, laneY)
     local boxPadding = 3
     local minimum = laneData.minimum
     local maximum = laneData.maximum
+    local average = laneData.average
     local minText
     local maxText
+    local avgValue
     local truncMin
     local truncMax
     local textY
@@ -333,7 +335,15 @@ local function drawKey(app, layout, laneData, laneY)
     lcd.drawText(layout.width - layout.rightInset, mmY, maxText, RIGHT)
 
     if app.radio.logShowAvg == true then
-        avgText = "Ø " .. tostring(math.floor((laneData.minimum + laneData.maximum) / 2)) .. laneData.keyunit
+        avgValue = average
+        if laneData.keyfloor then
+            avgValue = math.floor(avgValue or 0)
+        elseif type(avgValue) == "number" then
+            avgValue = string.format("%.1f", avgValue)
+        else
+            avgValue = tostring(avgValue or 0)
+        end
+        avgText = "Ø " .. tostring(avgValue) .. laneData.keyunit
         avgY = mmY + th - 2
         lcd.drawText(layout.graphWidth + 5, avgY, avgText, LEFT)
     end
@@ -572,6 +582,7 @@ local function updatePaintCache(state)
                 pen = entry.pen,
                 minimum = entry.minimum,
                 maximum = entry.maximum,
+                average = entry.average,
                 keyname = entry.keyname,
                 keyunit = entry.keyunit,
                 keyminmax = entry.keyminmax,
