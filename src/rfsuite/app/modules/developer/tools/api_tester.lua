@@ -181,8 +181,8 @@ function Page:open(ctx)
         autoOpenResults = false
     }
     local node = {
-        title = ctx.item.title or "API Tester",
-        subtitle = ctx.item.subtitle or "Manual API calls",
+        title = ctx.item.title or "@i18n(app.modules.api_tester.name)@",
+        subtitle = ctx.item.subtitle or "@i18n(app.modules.api_tester.subtitle)@",
         breadcrumb = ctx.breadcrumb,
         navButtons = {menu = true, save = false, reload = false, tool = false, help = false},
         state = state,

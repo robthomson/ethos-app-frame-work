@@ -57,8 +57,8 @@ return {
         },
         {
             id = "settings_admin",
-            title = "Settings",
-            subtitle = "General, shortcuts, dashboard and audio",
+            title = "@i18n(app.modules.settings.name)@",
+            subtitle = "@i18n(app.modules.settings.settings_summary)@",
             loaderSpeed = 0.08,
             kind = "menu",
             source = "app/menu/menus/settings_admin.lua",
@@ -69,8 +69,8 @@ return {
         },
         {
             id = "developer",
-            title = "Developer",
-            subtitle = "Developer tools",
+            title = "@i18n(app.modules.settings.txt_developer)@",
+            subtitle = "@i18n(app.modules.settings.txt_developer_tools)@",
             loaderSpeed = 0.08,
             kind = "menu",
             source = "app/menu/menus/developer.lua",

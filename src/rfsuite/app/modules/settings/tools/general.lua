@@ -44,15 +44,15 @@ local function copyTable(source)
 end
 
 local Page = PrefsPage.create({
-    title = "General",
-    subtitle = "General settings",
+    title = "@i18n(app.modules.settings.txt_general)@",
+    subtitle = "@i18n(app.modules.settings.general_settings)@",
     navButtons = {menu = true, save = true, reload = false, tool = false, help = false},
     readState = function(framework)
         return copyTable(framework.preferences:section("general", {}))
     end,
     sections = {
         {
-            title = "Display",
+            title = "@i18n(app.modules.settings.panel_display)@",
             fields = {
                 {kind = "choice", label = "Icon Size", key = "iconsize", choices = ICON_SIZE_CHOICES, get = function(state) return state.iconsize ~= nil and state.iconsize or 1 end},
                 {kind = "choice", label = "TX Battery Style", key = "txbatt_type", choices = TX_BATT_CHOICES, get = function(state) return state.txbatt_type ~= nil and state.txbatt_type or 0 end},
@@ -63,7 +63,7 @@ local Page = PrefsPage.create({
             }
         },
         {
-            title = "Safety",
+            title = "@i18n(app.modules.settings.panel_safety_prompts)@",
             fields = {
                 {kind = "boolean", label = "Confirm Before Save", key = "save_confirm", default = true},
                 {kind = "boolean", label = "Save Only When Dirty", key = "save_dirty_only", default = true},
@@ -74,16 +74,16 @@ local Page = PrefsPage.create({
             }
         },
         {
-            title = "Integration",
+            title = "@i18n(app.modules.settings.panel_integration)@",
             fields = {
                 {kind = "boolean", label = "Sync Model Name", key = "syncname", default = false},
                 {kind = "boolean", label = "Show MSP Status Dialog", key = "mspstatusdialog", default = true}
             }
         },
         {
-            title = "Developer",
+            title = "@i18n(app.modules.settings.txt_developer)@",
             fields = {
-                {kind = "boolean", label = "Enable Developer Tools", key = "developer_tools", default = false}
+                {kind = "boolean", label = "@i18n(app.modules.settings.enable_developer_tools)@", key = "developer_tools", default = false}
             }
         }
     },

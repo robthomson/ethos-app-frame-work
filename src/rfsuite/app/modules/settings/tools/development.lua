@@ -160,8 +160,8 @@ local function applyRuntimeSettings(app, state)
 end
 
 local Page = PrefsPage.create({
-    title = "Development",
-    subtitle = "Developer settings",
+    title = "@i18n(app.modules.settings.name)@",
+    subtitle = "@i18n(app.modules.settings.developer_settings)@",
     navButtons = {menu = true, save = true, reload = true, tool = false, help = false},
     readState = readState,
     sections = {
