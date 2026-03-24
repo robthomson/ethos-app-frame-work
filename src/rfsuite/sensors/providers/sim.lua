@@ -51,19 +51,36 @@ function Provider.new(framework)
     return setmetatable({
         framework = framework,
         sensors = {},
+        sensorMetadata = {},
         lastValues = {},
         lastPush = {}
     }, Provider)
 end
 
-function Provider:_ensureSensor(uid, name, unit, decimals, minValue, maxValue)
+function Provider:_ensureSensor(uid, name, unit, decimals, minValue, maxValue, moduleNumber)
     local sensor = self.sensors[uid]
-    local moduleNumber
+    local metadata = self.sensorMetadata[uid]
 
-    moduleNumber = moduleNumberForSession(self.framework.session)
+    if metadata
+        and metadata.name == name
+        and metadata.unit == unit
+        and metadata.decimals == decimals
+        and metadata.minValue == minValue
+        and metadata.maxValue == maxValue
+        and metadata.moduleNumber == moduleNumber then
+        return sensor
+    end
 
     if sensor then
         syncSensorMetadata(sensor, name, unit, decimals, minValue, maxValue, moduleNumber)
+        self.sensorMetadata[uid] = {
+            name = name,
+            unit = unit,
+            decimals = decimals,
+            minValue = minValue,
+            maxValue = maxValue,
+            moduleNumber = moduleNumber
+        }
         return sensor
     end
 
@@ -71,6 +88,14 @@ function Provider:_ensureSensor(uid, name, unit, decimals, minValue, maxValue)
     if sensor then
         syncSensorMetadata(sensor, name, unit, decimals, minValue, maxValue, moduleNumber)
         self.sensors[uid] = sensor
+        self.sensorMetadata[uid] = {
+            name = name,
+            unit = unit,
+            decimals = decimals,
+            minValue = minValue,
+            maxValue = maxValue,
+            moduleNumber = moduleNumber
+        }
         return sensor
     end
 
@@ -87,6 +112,14 @@ function Provider:_ensureSensor(uid, name, unit, decimals, minValue, maxValue)
     )
 
     self.sensors[uid] = sensor
+    self.sensorMetadata[uid] = {
+        name = name,
+        unit = unit,
+        decimals = decimals,
+        minValue = minValue,
+        maxValue = maxValue,
+        moduleNumber = moduleNumber
+    }
     return sensor
 end
 
@@ -99,11 +132,13 @@ function Provider:wakeup()
     local value
     local now = os.clock()
     local useRawValue = utils.ethosVersionAtLeast({26, 1, 0})
+    local moduleNumber
 
     if not telemetry or not telemetry.simSensors then
         return
     end
 
+    moduleNumber = moduleNumberForSession(self.framework.session)
     sensorList = telemetry.simSensors()
     for i = 1, #sensorList do
         descriptor = sensorList[i]
@@ -113,7 +148,8 @@ function Provider:wakeup()
             descriptor.sensor.unit,
             descriptor.sensor.dec,
             descriptor.sensor.min,
-            descriptor.sensor.max
+            descriptor.sensor.max,
+            moduleNumber
         )
 
         if sensor then
@@ -139,6 +175,7 @@ end
 
 function Provider:reset()
     self.sensors = {}
+    self.sensorMetadata = {}
     self.lastValues = {}
     self.lastPush = {}
 end

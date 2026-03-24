@@ -8,6 +8,8 @@ local framework = require("framework.core.init")
 local utils = {}
 
 local uuidCounter = 0
+local simSensorChunks = {}
+local simSensorDirsReady = false
 
 local function appendVersionParts(parts, value)
     local valueType
@@ -208,25 +210,43 @@ end
 function utils.simSensors(id)
     local chunk
     local err
+    local ok
     local result
+    local path
 
     if id == nil then
         return 0
     end
 
-    if os and os.mkdir then
+    if simSensorDirsReady ~= true and os and os.mkdir then
         pcall(os.mkdir, "LOGS:")
         pcall(os.mkdir, "LOGS:/rfsuite")
         pcall(os.mkdir, "LOGS:/rfsuite/sensors")
+        simSensorDirsReady = true
     end
 
-    chunk, err = loadfile("sim/sensors/" .. tostring(id) .. ".lua")
-    if not chunk then
-        utils.log("Error loading telemetry file: " .. tostring(err), "warn")
+    path = "sim/sensors/" .. tostring(id) .. ".lua"
+    chunk = simSensorChunks[path]
+
+    if chunk == nil then
+        chunk, err = loadfile(path)
+        if not chunk then
+            utils.log("Error loading telemetry file: " .. tostring(err), "warn")
+            simSensorChunks[path] = false
+            return 0
+        end
+
+        simSensorChunks[path] = chunk
+    elseif chunk == false then
         return 0
     end
 
-    result = chunk()
+    ok, result = pcall(chunk)
+    if ok ~= true then
+        utils.log("Error executing telemetry file: " .. tostring(result), "warn")
+        return 0
+    end
+
     return result or 0
 end
 
