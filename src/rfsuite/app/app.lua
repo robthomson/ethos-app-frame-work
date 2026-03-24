@@ -123,8 +123,6 @@ local MENU_LOADER_PROGRESS_FACTOR = 4.0
 local LOADER_TIMEOUT_MESSAGE = "Error: timed out"
 local LOADER_TIMEOUT_DETAIL = "Press close to continue."
 local MSP_DEBUG_PLACEHOLDER = "MSP Waiting"
-local DIRTY_WRAPPERS_INSTALLED = false
-local DIRTY_OWNER = nil
 local unpack_fn = table.unpack or unpack
 local APP_CALLBACK_WAKEUP_OPTIONS = {
     maxCalls = 6,
@@ -741,25 +739,40 @@ function App:_reportNodeError(context, err)
 end
 
 function App:_installDirtyCallbackWrappers()
-    local function wrapSetter(methodName)
-        local original = form and form[methodName]
+    local wrapperOriginals
 
+    local function wrapSetter(methodName)
+        local original
+
+        if not form then
+            return
+        end
+
+        original = wrapperOriginals[methodName] or form[methodName]
         if type(original) ~= "function" then
             return
         end
+
+        if wrapperOriginals[methodName] ~= nil then
+            return
+        end
+
+        wrapperOriginals[methodName] = original
 
         form[methodName] = function(...)
             local argc = select("#", ...)
             local args = {...}
             local setterIdx
             local setter
+            local owner
 
             for setterIdx = argc, 1, -1 do
                 if type(args[setterIdx]) == "function" then
                     setter = args[setterIdx]
                     args[setterIdx] = function(...)
-                        if DIRTY_OWNER and (DIRTY_OWNER.dirtySuspendDepth or 0) <= 0 and DIRTY_OWNER.markPageDirty then
-                            DIRTY_OWNER:markPageDirty()
+                        owner = form and form.__rfDirtyOwner or nil
+                        if owner and (owner.dirtySuspendDepth or 0) <= 0 and owner.markPageDirty then
+                            owner:markPageDirty()
                         end
                         return setter(...)
                     end
@@ -771,8 +784,14 @@ function App:_installDirtyCallbackWrappers()
         end
     end
 
-    if DIRTY_WRAPPERS_INSTALLED or not form then
+    if not form then
         return
+    end
+
+    wrapperOriginals = form.__rfDirtyWrapperOriginals
+    if type(wrapperOriginals) ~= "table" then
+        wrapperOriginals = {}
+        form.__rfDirtyWrapperOriginals = wrapperOriginals
     end
 
     wrapSetter("addBooleanField")
@@ -783,8 +802,6 @@ function App:_installDirtyCallbackWrappers()
     wrapSetter("addSensorField")
     wrapSetter("addColorField")
     wrapSetter("addSwitchField")
-
-    DIRTY_WRAPPERS_INSTALLED = true
 end
 
 function App:_shouldManageDirtySave(node)
@@ -2111,7 +2128,9 @@ function App:event(category, value, x, y)
 end
 
 function App:onActivate()
-    DIRTY_OWNER = self
+    if form then
+        form.__rfDirtyOwner = self
+    end
     self.returnMenuArmed = false
     self.pendingDialogAction = nil
     self.pendingDialogActionReady = false
@@ -2120,8 +2139,8 @@ function App:onActivate()
 end
 
 function App:onDeactivate()
-    if DIRTY_OWNER == self then
-        DIRTY_OWNER = nil
+    if form and form.__rfDirtyOwner == self then
+        form.__rfDirtyOwner = nil
     end
     self.returnMenuArmed = false
     self.pendingDialogAction = nil
@@ -2131,8 +2150,8 @@ function App:onDeactivate()
 end
 
 function App:close()
-    if DIRTY_OWNER == self then
-        DIRTY_OWNER = nil
+    if form and form.__rfDirtyOwner == self then
+        form.__rfDirtyOwner = nil
     end
     self.returnMenuArmed = false
     self.pendingDialogAction = nil
