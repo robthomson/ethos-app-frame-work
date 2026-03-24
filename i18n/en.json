@@ -4009,6 +4009,12 @@
           "max_length": 11,
           "needs_translation": false,
           "translation": "Diagnostics"
+        },
+        "subtitle": {
+          "english": "System / Tools / Diagnostics",
+          "max_length": 28,
+          "needs_translation": false,
+          "translation": "System / Tools / Diagnostics"
         }
       },
       "esc_motors": {
@@ -5699,6 +5705,24 @@
           "max_length": 11,
           "needs_translation": false,
           "translation": "FBL Sensors"
+        },
+        "source": {
+          "english": "Source",
+          "max_length": 6,
+          "needs_translation": false,
+          "translation": "Source"
+        },
+        "subtitle": {
+          "english": "Flight controller sensor view",
+          "max_length": 29,
+          "needs_translation": false,
+          "translation": "Flight controller sensor view"
+        },
+        "wait": {
+          "english": "WAIT",
+          "max_length": 4,
+          "needs_translation": false,
+          "translation": "WAIT"
         }
       },
       "fblstatus": {
@@ -5888,6 +5912,12 @@
           "needs_translation": false,
           "translation": "Would you like to erase the dataflash?"
         },
+        "erase_failed": {
+          "english": "Unable to erase dataflash right now.",
+          "max_length": 35,
+          "needs_translation": false,
+          "translation": "Unable to erase dataflash right now."
+        },
         "erasing": {
           "english": "Erasing",
           "max_length": 7,
@@ -5923,6 +5953,12 @@
           "max_length": 10,
           "needs_translation": false,
           "translation": "FBL Status"
+        },
+        "subtitle": {
+          "english": "Flight controller status",
+          "max_length": 24,
+          "needs_translation": false,
+          "translation": "Flight controller status"
         },
         "ok": {
           "english": "OK",
@@ -6296,11 +6332,53 @@
           "needs_translation": false,
           "translation": "Simulation"
         },
+        "subtitle": {
+          "english": "Device information",
+          "max_length": 18,
+          "needs_translation": false,
+          "translation": "Device information"
+        },
         "supported_versions": {
           "english": "Supported MSP Versions",
           "max_length": 22,
           "needs_translation": false,
           "translation": "Supported MSP Versions"
+        },
+        "transport_crsf": {
+          "english": "CRSF",
+          "max_length": 4,
+          "needs_translation": false,
+          "translation": "CRSF"
+        },
+        "transport_disconnected": {
+          "english": "DISCONNECTED",
+          "max_length": 12,
+          "needs_translation": false,
+          "translation": "DISCONNECTED"
+        },
+        "transport_sim": {
+          "english": "SIM",
+          "max_length": 3,
+          "needs_translation": false,
+          "translation": "SIM"
+        },
+        "transport_sport": {
+          "english": "SPORT",
+          "max_length": 5,
+          "needs_translation": false,
+          "translation": "SPORT"
+        },
+        "value_off": {
+          "english": "OFF",
+          "max_length": 3,
+          "needs_translation": false,
+          "translation": "OFF"
+        },
+        "value_on": {
+          "english": "ON",
+          "max_length": 2,
+          "needs_translation": false,
+          "translation": "ON"
         },
         "version": {
           "english": "Version",
@@ -8490,6 +8568,12 @@
           "needs_translation": false,
           "translation": "MSP Sensor"
         },
+        "menu_name": {
+          "english": "RF Status",
+          "max_length": 9,
+          "needs_translation": false,
+          "translation": "RF Status"
+        },
         "name": {
           "english": "Status",
           "max_length": 6,
@@ -8507,6 +8591,12 @@
           "max_length": 9,
           "needs_translation": false,
           "translation": "RF Module"
+        },
+        "subtitle": {
+          "english": "RF and background health",
+          "max_length": 24,
+          "needs_translation": false,
+          "translation": "RF and background health"
         },
         "telemetrysensors": {
           "english": "Telemetry Sensors",
@@ -9684,11 +9774,65 @@
           "needs_translation": false,
           "translation": "Enable required sensors on flight controller?"
         },
+        "msg_repair_eeprom_failed": {
+          "english": "Unable to write EEPROM.",
+          "max_length": 23,
+          "needs_translation": false,
+          "translation": "Unable to write EEPROM."
+        },
+        "msg_repair_failed": {
+          "english": "Repair failed",
+          "max_length": 13,
+          "needs_translation": false,
+          "translation": "Repair failed"
+        },
         "msg_repair_fin": {
           "english": "The flight controller has been configured? You may need to perform a discover sensors to see the changes.",
           "max_length": 105,
           "needs_translation": false,
           "translation": "The flight controller has been configured? You may need to perform a discover sensors to see the changes."
+        },
+        "msg_repair_loading_config": {
+          "english": "Unable to load telemetry configuration.",
+          "max_length": 38,
+          "needs_translation": false,
+          "translation": "Unable to load telemetry configuration."
+        },
+        "msg_repair_read_failed": {
+          "english": "Unable to read telemetry configuration.",
+          "max_length": 38,
+          "needs_translation": false,
+          "translation": "Unable to read telemetry configuration."
+        },
+        "msg_repair_reboot_failed": {
+          "english": "Unable to reboot flight controller.",
+          "max_length": 34,
+          "needs_translation": false,
+          "translation": "Unable to reboot flight controller."
+        },
+        "msg_repair_reboot_queue_failed": {
+          "english": "Unable to queue reboot.",
+          "max_length": 23,
+          "needs_translation": false,
+          "translation": "Unable to queue reboot."
+        },
+        "msg_repair_unavailable": {
+          "english": "Telemetry sensor repair is not available right now.",
+          "max_length": 50,
+          "needs_translation": false,
+          "translation": "Telemetry sensor repair is not available right now."
+        },
+        "msg_repair_updating": {
+          "english": "Updating telemetry sensors.",
+          "max_length": 27,
+          "needs_translation": false,
+          "translation": "Updating telemetry sensors."
+        },
+        "msg_repair_write_failed": {
+          "english": "Unable to write telemetry configuration.",
+          "max_length": 39,
+          "needs_translation": false,
+          "translation": "Unable to write telemetry configuration."
         },
         "name": {
           "english": "Sensors",
@@ -9701,6 +9845,12 @@
           "max_length": 2,
           "needs_translation": false,
           "translation": "OK"
+        },
+        "subtitle": {
+          "english": "Sensor validation and repair",
+          "max_length": 28,
+          "needs_translation": false,
+          "translation": "Sensor validation and repair"
         }
       }
     },
@@ -10038,6 +10188,32 @@
       "needs_translation": false,
       "translation": "Ground Speed"
     },
+    "gyro": {
+      "summary": {
+        "english": "Gyro",
+        "max_length": 4,
+        "needs_translation": false,
+        "translation": "Gyro"
+      },
+      "x": {
+        "english": "Gyro X",
+        "max_length": 6,
+        "needs_translation": false,
+        "translation": "Gyro X"
+      },
+      "y": {
+        "english": "Gyro Y",
+        "max_length": 6,
+        "needs_translation": false,
+        "translation": "Gyro Y"
+      },
+      "z": {
+        "english": "Gyro Z",
+        "max_length": 6,
+        "needs_translation": false,
+        "translation": "Gyro Z"
+      }
+    },
     "headspeed": {
       "english": "Headspeed",
       "max_length": 9,
@@ -10062,6 +10238,32 @@
       "needs_translation": false,
       "translation": "MCU Temperature"
     },
+    "mag": {
+      "summary": {
+        "english": "Mag",
+        "max_length": 3,
+        "needs_translation": false,
+        "translation": "Mag"
+      },
+      "x": {
+        "english": "Mag X",
+        "max_length": 5,
+        "needs_translation": false,
+        "translation": "Mag X"
+      },
+      "y": {
+        "english": "Mag Y",
+        "max_length": 5,
+        "needs_translation": false,
+        "translation": "Mag Y"
+      },
+      "z": {
+        "english": "Mag Z",
+        "max_length": 5,
+        "needs_translation": false,
+        "translation": "Mag Z"
+      }
+    },
     "pid_profile": {
       "english": "PID Profile",
       "max_length": 11,
@@ -10079,6 +10281,12 @@
       "max_length": 4,
       "needs_translation": false,
       "translation": "RSSI"
+    },
+    "sonar": {
+      "english": "Sonar",
+      "max_length": 5,
+      "needs_translation": false,
+      "translation": "Sonar"
     },
     "smartconsumption": {
       "english": "Smart Consumption",

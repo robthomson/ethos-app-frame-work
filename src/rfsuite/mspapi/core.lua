@@ -162,9 +162,6 @@ function core.buildDeltaPayload(apiName, payload, apiStructure, positionmap, rec
         if shouldUseField(fieldDef) and payload[name] ~= nil then
             value = payload[name]
             scale = fieldDef.scale or 1
-            if fieldDef.decimals then
-                scale = scale / (utils.decimalInc(fieldDef.decimals) or 1)
-            end
             value = math.floor((value * scale) + 0.5)
 
             writeFunction = context.msp.mspHelper and context.msp.mspHelper["write" .. fieldDef.type] or nil
@@ -214,9 +211,6 @@ function core.buildFullPayload(apiName, payload, apiStructure)
             end
 
             scale = fieldDef.scale or 1
-            if fieldDef.decimals then
-                scale = scale / (utils.decimalInc(fieldDef.decimals) or 1)
-            end
             value = math.floor((value * scale) + 0.5)
 
             writeFunction = context.msp.mspHelper and context.msp.mspHelper["write" .. fieldDef.type] or nil
