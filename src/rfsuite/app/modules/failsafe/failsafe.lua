@@ -60,7 +60,7 @@ local function syncValueEnablement(node)
     end
 end
 
-local function wakeup(node)
+local function syncControlState(node)
     local buildCount = node and node.app and node.app.formBuildCount or 0
     local parts = {tostring(buildCount)}
     local index
@@ -117,9 +117,11 @@ end
 
 return MspPage.create({
     title = "@i18n(app.modules.failsafe.name)@",
-    buildFormWhileLoading = true,
     loaderOnEnter = {
         watchdogTimeout = 10.0
+    },
+    loaderOnSave = {
+        watchdogTimeout = 16.0
     },
     eepromWrite = true,
     help = {
@@ -132,5 +134,5 @@ return MspPage.create({
         labels = labels,
         fields = fields
     },
-    wakeup = wakeup
+    controlStateSync = syncControlState
 })

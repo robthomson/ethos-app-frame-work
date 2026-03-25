@@ -973,6 +973,30 @@ local function hasBuiltControls(node)
     return false
 end
 
+local function runControlStateSync(node)
+    local ok
+    local err
+
+    if type(node) ~= "table" or type(node.spec) ~= "table" then
+        return true
+    end
+
+    if type(node.spec.controlStateSync) ~= "function" then
+        return true
+    end
+
+    ok, err = pcall(node.spec.controlStateSync, node, node.app)
+    if ok ~= true then
+        node.state.error = tostring(err)
+        if node.app and node.app._invalidateForm then
+            node.app:_invalidateForm()
+        end
+        return false
+    end
+
+    return true
+end
+
 local function buildField(line, node, app, field)
     local positions = inlinePositions(node, app, field)
 
@@ -1512,6 +1536,9 @@ local function finishRead(node)
     updateDynamicTitle(node)
     refreshBuiltControls(node)
     setBuiltControlsEnabled(node, true)
+    if runControlStateSync(node) ~= true then
+        return
+    end
     releasePageApis(node, false)
     resumeDirtyAfterLoad(node, true)
     if node.app and node.app.requestLoaderClose then
@@ -1739,6 +1766,14 @@ function MspPage.create(spec)
             focusMenuOnClose = true,
             modal = true
         }
+        local defaultLoaderOnSave = {
+            kind = "save",
+            title = ctx.item.title or spec.title or "MSP Page",
+            message = "Saving values.",
+            closeWhenIdle = false,
+            transferInfo = true,
+            modal = true
+        }
         local node = {
             spec = spec or {},
             app = ctx.app,
@@ -1748,6 +1783,7 @@ function MspPage.create(spec)
             breadcrumb = ctx.breadcrumb,
             showLoaderOnEnter = spec.showLoaderOnEnter ~= false,
             loaderOnEnter = mergeTable(defaultLoaderOnEnter, spec.loaderOnEnter),
+            loaderOnSave = mergeTable(defaultLoaderOnSave, spec.loaderOnSave),
             navButtons = {
                 menu = DEFAULT_NAV.menu,
                 save = DEFAULT_NAV.save,
@@ -1890,6 +1926,8 @@ function MspPage.create(spec)
 
             if self.state.loaded ~= true then
                 setBuiltControlsEnabled(self, false)
+            else
+                runControlStateSync(self)
             end
 
             clearDirtyAfterBuildIfNeeded(self)
@@ -1985,14 +2023,7 @@ function MspPage.create(spec)
 
             self.state.saving = true
             self.state.error = nil
-            beginLoader(self, {
-                kind = "save",
-                title = self.baseTitle,
-                message = "Saving values.",
-                closeWhenIdle = false,
-                transferInfo = true,
-                modal = true
-            })
+            beginLoader(self, self.loaderOnSave)
 
             return runWrite(self, 1)
         end
@@ -2015,6 +2046,10 @@ function MspPage.create(spec)
             end
 
             updateDynamicTitle(self)
+
+            if runControlStateSync(self) ~= true then
+                return
+            end
 
             if type(self.spec.wakeup) == "function" then
                 local ok, err = pcall(self.spec.wakeup, self, self.app)
