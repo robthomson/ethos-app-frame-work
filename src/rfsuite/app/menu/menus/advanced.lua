@@ -9,6 +9,6 @@ return {
         {id = "mainrotor", title = "Main Rotor", subtitle = "Main rotor tuning", kind = "page", path = "profile_mainrotor/mainrotor.lua", image = "app/modules/profile_mainrotor/mainrotor.png"},
         {id = "tailrotor", title = "Tail Rotor", subtitle = "Tail rotor tuning", kind = "page", path = "profile_tailrotor/tailrotor.lua", image = "app/modules/profile_tailrotor/tailrotor.png"},
         {id = "rescue", title = "Rescue", subtitle = "Rescue configuration", kind = "page", path = "profile_rescue/rescue.lua", image = "app/modules/profile_rescue/rescue.png"},
-        {id = "rates_advanced", title = "Rates Advanced", subtitle = "Advanced rates tuning", kind = "page", path = "rates_advanced/rates_advanced.lua", image = "app/modules/rates_advanced/rates.png"}
+        {id = "rates_advanced", title = "Rates", subtitle = "Advanced rates tuning", kind = "menu", source = "app/menu/menus/rates_advanced.lua", image = "app/modules/rates_advanced/rates.png"}
     }
 }

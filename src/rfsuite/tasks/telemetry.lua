@@ -431,6 +431,14 @@ function TelemetryTask:_getSensor(sensorKey, paramMin, paramMax, paramThresholds
         value = entry.transform(value)
     end
 
+    if sensorKey == "pid_profile" then
+        self.framework.session:set("activeProfile", value)
+    end
+
+    if sensorKey == "rate_profile" then
+        self.framework.session:set("activeRateProfile", value)
+    end
+
     if sensorKey == "battery_profile" then
         self.framework.session:set("activeBatteryProfile", value)
     end
