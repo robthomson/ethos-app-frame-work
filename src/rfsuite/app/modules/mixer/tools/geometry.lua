@@ -6,6 +6,7 @@
 local Page = {}
 
 local diagnostics = assert(loadfile("app/modules/diagnostics/lib.lua"))()
+local AudioLib = require("lib.audio")
 local utils = require("lib.utils")
 
 local LIVE_UPDATE_INTERVAL = 0.25
@@ -639,13 +640,32 @@ end
 
 local function setOverrideEnabled(node, enabled)
     local state = node.state
+    local title = node.title or "@i18n(app.modules.mixer.geometry)@"
+    local message = enabled and "@i18n(app.modules.mixer.swash_override_enabling)@" or "@i18n(app.modules.mixer.swash_override_disabling)@"
+    local audioFile = enabled and "soverideen.wav" or "soveridedis.wav"
     local ok
     local payloadValue
 
     payloadValue = enabled and mixerOverrideOnValue() or MIXER_OVERRIDE_OFF
+
+    if node.app and node.app.ui and node.app.ui.showLoader then
+        node.app.ui.showLoader({
+            kind = "progress",
+            title = "@i18n(app.modules.mixer.swash_override)@",
+            message = message,
+            closeWhenIdle = false,
+            watchdogTimeout = 4.0,
+            transferInfo = true,
+            modal = true
+        })
+    end
+
     ok = queueOverrideCommand(node, payloadValue)
     if ok ~= true then
-        diagnostics.openMessageDialog(node.title or "@i18n(app.modules.mixer.geometry)@", enabled and "Failed to enable swash setup mode." or "Failed to disable swash setup mode.")
+        if node.app and node.app.ui and node.app.ui.clearProgressDialog then
+            node.app.ui.clearProgressDialog(true)
+        end
+        diagnostics.openMessageDialog(title, enabled and "Failed to enable swash setup mode." or "Failed to disable swash setup mode.")
         return false
     end
 
@@ -654,6 +674,10 @@ local function setOverrideEnabled(node, enabled)
     if enabled == true then
         state.lastAppliedDigest = digestFormData(state)
         state.lastAppliedSnapshot = snapshotFormData(state)
+    end
+    AudioLib.playFile("app", audioFile)
+    if node.app and node.app.ui and node.app.ui.clearProgressDialog then
+        node.app.ui.clearProgressDialog(true)
     end
     return true
 end

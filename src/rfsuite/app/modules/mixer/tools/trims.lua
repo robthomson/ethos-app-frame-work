@@ -6,6 +6,7 @@
 local Page = {}
 
 local diagnostics = assert(loadfile("app/modules/diagnostics/lib.lua"))()
+local AudioLib = require("lib.audio")
 local utils = require("lib.utils")
 
 local LIVE_UPDATE_INTERVAL = 0.85
@@ -414,10 +415,28 @@ end
 
 local function setOverrideEnabled(node, enabled)
     local state = node.state
+    local title = node.title or "@i18n(app.modules.mixer.trims)@"
+    local message = enabled and "@i18n(app.modules.trim.mixer_override_enabling)@" or "@i18n(app.modules.trim.mixer_override_disabling)@"
+    local audioFile = enabled and "moverideen.wav" or "moveridedis.wav"
     local ok = queueOverrideCommand(node, enabled and MIXER_OVERRIDE_ON or MIXER_OVERRIDE_OFF)
 
+    if node.app and node.app.ui and node.app.ui.showLoader then
+        node.app.ui.showLoader({
+            kind = "progress",
+            title = "@i18n(app.modules.trim.mixer_override)@",
+            message = message,
+            closeWhenIdle = false,
+            watchdogTimeout = 4.0,
+            transferInfo = true,
+            modal = true
+        })
+    end
+
     if ok ~= true then
-        diagnostics.openMessageDialog(node.title or "@i18n(app.modules.mixer.trims)@", enabled and "Failed to enable mixer override." or "Failed to disable mixer override.")
+        if node.app and node.app.ui and node.app.ui.clearProgressDialog then
+            node.app.ui.clearProgressDialog(true)
+        end
+        diagnostics.openMessageDialog(title, enabled and "Failed to enable mixer override." or "Failed to disable mixer override.")
         return false
     end
 
@@ -425,6 +444,10 @@ local function setOverrideEnabled(node, enabled)
     state.lastChangeAt = os.clock()
     if enabled == true then
         state.lastAppliedDigest = digestValues(state)
+    end
+    AudioLib.playFile("app", audioFile)
+    if node.app and node.app.ui and node.app.ui.clearProgressDialog then
+        node.app.ui.clearProgressDialog(true)
     end
     return true
 end
