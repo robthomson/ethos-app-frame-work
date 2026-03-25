@@ -165,7 +165,11 @@ local function fieldDefaultValue(field)
         value = value * field.mult
     end
 
-    return value
+    if value >= 0 then
+        return math.floor(value + 0.5)
+    end
+
+    return math.ceil(value - 0.5)
 end
 
 local function setterValue(field, controlValue)
