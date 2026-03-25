@@ -8,6 +8,6 @@ return {
         {id = "accelerometer", title = "Accelerometer", subtitle = "Accelerometer calibration", loaderSpeed = 0.08, kind = "page", path = "accelerometer/accelerometer.lua", image = "app/modules/accelerometer/acc.png"},
         {id = "alignment", title = "Alignment", subtitle = "Sensor alignment", loaderSpeed = 0.08, kind = "page", path = "alignment/alignment.lua", image = "app/modules/alignment/alignment.png"},
         {id = "ports", title = "Ports", subtitle = "UART and feature ports", loaderSpeed = 0.08, kind = "page", path = "ports/ports.lua", image = "app/modules/ports/ports.png"},
-        {id = "mixer", title = "Mixer", subtitle = "Mixer and layout", loaderSpeed = 0.08, kind = "page", path = "mixer/mixer.lua", image = "app/modules/mixer/mixer.png"}
+        {id = "mixer", title = "Mixer", subtitle = "Mixer and layout", loaderSpeed = 0.08, kind = "menu", source = "app/menu/menus/mixer.lua", image = "app/modules/mixer/mixer.png"}
     }
 }
