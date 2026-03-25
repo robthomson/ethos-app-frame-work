@@ -31,6 +31,8 @@ local MATRIX_FIELD_INHERIT_KEYS = {
 }
 local relinkFlexRows
 local resumeDirtyAfterLoad
+local ensureApis
+local failRead
 local function noopHandler()
 end
 
@@ -409,6 +411,45 @@ end
 
 local function queueReload(node, showLoader)
     local framework = node and node.app and node.app.framework or nil
+    local function prepareQueuedReload()
+        local ok
+        local err
+
+        if type(node.state) ~= "table" then
+            return
+        end
+
+        if nodeIsOpen(node) ~= true or node.state.saving == true then
+            node.state.reloadQueued = false
+            return
+        end
+
+        ok, err = ensureApis(node)
+        if not ok then
+            node.state.reloadQueued = false
+            node.state.loading = false
+            node.state.loaded = false
+            node.state.error = tostring(err or "read_failed")
+            resumeDirtyAfterLoad(node, true)
+            if node.app and node.app._invalidateForm then
+                node.app:_invalidateForm()
+            end
+            return
+        end
+
+        if nodeIsOpen(node) ~= true or node.state.saving == true then
+            node.state.reloadQueued = false
+            return
+        end
+
+        node.state.reloadQueued = false
+        node.state.reloadPrepared = true
+        node.state.preparedShowLoader = showLoader ~= false
+
+        if node.app and node.app._invalidateForm then
+            node.app:_invalidateForm()
+        end
+    end
 
     if nodeIsOpen(node) ~= true or node.state.reloadQueued == true or node.state.loading == true or node.state.saving == true then
         return false
@@ -417,30 +458,24 @@ local function queueReload(node, showLoader)
     node.state.reloadQueued = true
     node.state.loading = true
     node.state.error = nil
+    node.state.reloadPrepared = false
+    node.state.preparedShowLoader = showLoader ~= false
 
     if node.app and node.app._invalidateForm then
         node.app:_invalidateForm()
     end
 
-    if framework and framework.callbackNow then
-        framework:callbackNow(function()
-            if type(node.state) ~= "table" then
-                return
-            end
-
-            node.state.reloadQueued = false
-
-            if nodeIsOpen(node) ~= true or node.state.saving == true then
-                return
-            end
-
-            node:reload(showLoader)
-        end, "immediate")
+    if framework and framework.callbackInSeconds then
+        framework:callbackInSeconds(0.02, prepareQueuedReload, "timer")
         return true
     end
 
-    node.state.reloadQueued = false
-    return node:reload(showLoader)
+    if framework and framework.callbackNow then
+        framework:callbackNow(prepareQueuedReload, "immediate")
+        return true
+    end
+
+    return prepareQueuedReload()
 end
 
 local function handleProfileChangeReload(node)
@@ -483,7 +518,7 @@ local function handleProfileChangeReload(node)
     return false
 end
 
-local function ensureApis(node)
+ensureApis = function(node)
     local mspTask = node.app.framework:getTask("msp")
     local apiSpecs = node.spec.api or {}
     local apiState = node.state.apis
@@ -1469,7 +1504,7 @@ local function clearDirtyAfterBuildIfNeeded(node)
     end
 end
 
-local function failRead(node, reason)
+failRead = function(node, reason)
     node.state.loading = false
     node.state.loaded = false
     node.state.error = tostring(reason or "read_failed")
@@ -1803,17 +1838,15 @@ function MspPage.create(spec)
             return self.state.loaded == true and self.state.loading ~= true and self.state.saving ~= true and self.state.error == nil
         end
 
-        function node:reload(showLoader)
-            local ok
-            local err
+        function node:reload(showLoader, apisReady)
             local shouldShowLoader = showLoader ~= false
 
-            ok, err = ensureApis(self)
-            if not ok then
-                failRead(self, err)
-                return false
+            if apisReady ~= true then
+                return queueReload(self, showLoader)
             end
 
+            self.state.reloadQueued = false
+            self.state.reloadPrepared = false
             self.state.loading = true
             self.state.error = nil
             suspendDirtyDuringLoad(self)
@@ -1894,6 +1927,12 @@ function MspPage.create(spec)
                 return
             end
 
+            if self.state.reloadPrepared == true and self.state.loading == true and self.state.saving ~= true then
+                self.state.reloadPrepared = false
+                self:reload(self.state.preparedShowLoader ~= false, true)
+                return
+            end
+
             if handleProfileChangeReload(self) == true then
                 return
             end
@@ -1935,6 +1974,7 @@ function MspPage.create(spec)
 
             self.state.closed = true
             self.state.reloadQueued = false
+            self.state.reloadPrepared = false
             self.state.loading = false
             self.state.saving = false
             self.state.needsInitialLoad = false
