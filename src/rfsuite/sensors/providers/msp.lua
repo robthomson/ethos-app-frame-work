@@ -374,7 +374,9 @@ function Provider:_ensureSchedule(now, isArmed)
     for _, apiName in ipairs(API_ORDER) do
         interval = self:_intervalFor(apiName, isArmed)
         if interval and interval > 0 then
-            self.nextDue[apiName] = self.nextDue[apiName] or now
+            -- Periodic sensor refreshes should not jump ahead of page/API reads on connect.
+            -- Immediate refreshes are handled separately via `onConnect` / `onDisarm`.
+            self.nextDue[apiName] = self.nextDue[apiName] or (now + interval)
         else
             self.nextDue[apiName] = nil
         end

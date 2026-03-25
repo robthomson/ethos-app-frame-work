@@ -2197,11 +2197,53 @@
         "needs_translation": false,
         "translation": "ON"
       },
+      "rates_type": {
+        "english": "Selects which rate table is used to interpret the RC rate, rate, and expo values.",
+        "max_length": 81,
+        "needs_translation": false,
+        "translation": "Selects which rate table is used to interpret the RC rate, rate, and expo values."
+      },
+      "rcRates_1": {
+        "english": "Controls roll stick sensitivity for the selected rate table.",
+        "max_length": 60,
+        "needs_translation": false,
+        "translation": "Controls roll stick sensitivity for the selected rate table."
+      },
+      "rcExpo_1": {
+        "english": "Applies roll expo to soften response around center stick.",
+        "max_length": 57,
+        "needs_translation": false,
+        "translation": "Applies roll expo to soften response around center stick."
+      },
+      "rates_1": {
+        "english": "Controls the secondary roll rate parameter for the selected rate table.",
+        "max_length": 71,
+        "needs_translation": false,
+        "translation": "Controls the secondary roll rate parameter for the selected rate table."
+      },
       "accel_limit_1": {
         "english": "Maximum acceleration of the craft in response to a stick movement.",
         "max_length": 66,
         "needs_translation": false,
         "translation": "Maximum acceleration of the craft in response to a stick movement."
+      },
+      "rcRates_2": {
+        "english": "Controls pitch stick sensitivity for the selected rate table.",
+        "max_length": 61,
+        "needs_translation": false,
+        "translation": "Controls pitch stick sensitivity for the selected rate table."
+      },
+      "rcExpo_2": {
+        "english": "Applies pitch expo to soften response around center stick.",
+        "max_length": 58,
+        "needs_translation": false,
+        "translation": "Applies pitch expo to soften response around center stick."
+      },
+      "rates_2": {
+        "english": "Controls the secondary pitch rate parameter for the selected rate table.",
+        "max_length": 72,
+        "needs_translation": false,
+        "translation": "Controls the secondary pitch rate parameter for the selected rate table."
       },
       "accel_limit_2": {
         "english": "Maximum acceleration of the craft in response to a stick movement.",
@@ -2209,11 +2251,47 @@
         "needs_translation": false,
         "translation": "Maximum acceleration of the craft in response to a stick movement."
       },
+      "rcRates_3": {
+        "english": "Controls yaw stick sensitivity for the selected rate table.",
+        "max_length": 59,
+        "needs_translation": false,
+        "translation": "Controls yaw stick sensitivity for the selected rate table."
+      },
+      "rcExpo_3": {
+        "english": "Applies yaw expo to soften response around center stick.",
+        "max_length": 56,
+        "needs_translation": false,
+        "translation": "Applies yaw expo to soften response around center stick."
+      },
+      "rates_3": {
+        "english": "Controls the secondary yaw rate parameter for the selected rate table.",
+        "max_length": 70,
+        "needs_translation": false,
+        "translation": "Controls the secondary yaw rate parameter for the selected rate table."
+      },
       "accel_limit_3": {
         "english": "Maximum acceleration of the craft in response to a stick movement.",
         "max_length": 66,
         "needs_translation": false,
         "translation": "Maximum acceleration of the craft in response to a stick movement."
+      },
+      "rcRates_4": {
+        "english": "Controls collective stick sensitivity for the selected rate table.",
+        "max_length": 66,
+        "needs_translation": false,
+        "translation": "Controls collective stick sensitivity for the selected rate table."
+      },
+      "rcExpo_4": {
+        "english": "Applies collective expo to soften response around center stick.",
+        "max_length": 63,
+        "needs_translation": false,
+        "translation": "Applies collective expo to soften response around center stick."
+      },
+      "rates_4": {
+        "english": "Controls the secondary collective rate parameter for the selected rate table.",
+        "max_length": 77,
+        "needs_translation": false,
+        "translation": "Controls the secondary collective rate parameter for the selected rate table."
       },
       "accel_limit_4": {
         "english": "Maximum acceleration of the craft in response to a stick movement.",
@@ -2310,6 +2388,18 @@
         "max_length": 53,
         "needs_translation": false,
         "translation": "The maximum gain applied to the yaw dynamic deadband."
+      },
+      "cyclic_ring": {
+        "english": "Limits combined cyclic input to prevent overdriving the swash at large stick deflections.",
+        "max_length": 89,
+        "needs_translation": false,
+        "translation": "Limits combined cyclic input to prevent overdriving the swash at large stick deflections."
+      },
+      "cyclic_polarity": {
+        "english": "Sets the direction used by cyclic ring compensation for the current mechanical setup.",
+        "max_length": 85,
+        "needs_translation": false,
+        "translation": "Sets the direction used by cyclic ring compensation for the current mechanical setup."
       }
     },
     "RESCUE_PROFILE": {

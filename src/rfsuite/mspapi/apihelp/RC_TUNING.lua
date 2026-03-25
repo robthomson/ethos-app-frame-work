@@ -36,4 +36,6 @@ return {
     ["yaw_dynamic_ceiling_gain"] = "@i18n(api.RC_TUNING.yaw_dynamic_ceiling_gain)@",
     ["yaw_dynamic_deadband_gain"] = "@i18n(api.RC_TUNING.yaw_dynamic_deadband_gain)@",
     ["yaw_dynamic_deadband_filter"] = "@i18n(api.RC_TUNING.yaw_dynamic_deadband_filter)@",
+    ["cyclic_ring"] = "@i18n(api.RC_TUNING.cyclic_ring)@",
+    ["cyclic_polarity"] = "@i18n(api.RC_TUNING.cyclic_polarity)@",
 }

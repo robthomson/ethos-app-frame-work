@@ -6,6 +6,26 @@
 local controller = {}
 local controller_mt = {__index = controller}
 
+local function clearTable(tbl)
+    local key
+
+    if type(tbl) ~= "table" then
+        return
+    end
+
+    for key in pairs(tbl) do
+        tbl[key] = nil
+    end
+end
+
+local function clearFormRefs(state)
+    clearTable(state.statusFields)
+    clearTable(state.valueFields)
+    clearTable(state.buttonFields)
+    clearTable(state.navFields)
+    state.headerTitleField = nil
+end
+
 function controller.new(shared, options)
     local opts = options or {}
 
@@ -38,26 +58,21 @@ end
 function controller:reset()
     self.state.formDirty = true
     self.state.formBuildCount = 0
-    self.state.statusFields = {}
-    self.state.valueFields = {}
-    self.state.buttonFields = {}
-    self.state.navFields = {}
-    self.state.headerTitleField = nil
+    clearFormRefs(self.state)
     self:_sync()
 end
 
 function controller:clearFormRefs()
-    self.state.statusFields = {}
-    self.state.valueFields = {}
-    self.state.buttonFields = {}
-    self.state.navFields = {}
-    self.state.headerTitleField = nil
-    self:_sync()
+    clearFormRefs(self.state)
 end
 
 function controller:invalidate()
+    local app = self:_app()
+
     self.state.formDirty = true
-    self:_sync()
+    if app then
+        app.formDirty = true
+    end
     if form and form.invalidate then
         form.invalidate()
     end
@@ -82,9 +97,11 @@ function controller:build(node)
     if form and form.clear then
         form.clear()
     end
-    self:clearFormRefs()
+    clearFormRefs(self.state)
     self.state.formBuildCount = (self.state.formBuildCount or 0) + 1
-    self:_sync()
+    if app then
+        app.formBuildCount = self.state.formBuildCount
+    end
 
     if app and app._addHeader then
         app:_addHeader(node)
@@ -125,11 +142,15 @@ function controller:build(node)
 end
 
 function controller:rebuildIfNeeded(node)
+    local app = self:_app()
+
     if self.state.formDirty ~= true then
         return
     end
     self.state.formDirty = false
-    self:_sync()
+    if app then
+        app.formDirty = false
+    end
     self:build(node)
 end
 

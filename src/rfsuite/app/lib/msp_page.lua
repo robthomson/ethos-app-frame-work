@@ -30,7 +30,16 @@ local MATRIX_FIELD_INHERIT_KEYS = {
     "help"
 }
 local relinkFlexRows
+local resumeDirtyAfterLoad
 local function noopHandler()
+end
+
+local function nodeIsOpen(node)
+    return type(node) == "table"
+        and type(node.state) == "table"
+        and node.state.closed ~= true
+        and node.app ~= nil
+        and node.app.currentNode == node
 end
 
 local function keepApisLoaded(node)
@@ -192,6 +201,18 @@ local function lineLabelSize(node, labelId)
     end
 
     return DEFAULT_INLINE_SIZE
+end
+
+local function wideStatusPos(app)
+    local width = app and app._windowSize and app:_windowSize() or select(1, lcd.getWindowSize())
+    local radio = app and app.radio or {}
+
+    return {
+        x = 8,
+        y = radio.linePaddingTop or 0,
+        w = math.max(40, width - 16),
+        h = radio.navbuttonHeight or 30
+    }
 end
 
 local function measureTextWidth(text)
@@ -386,6 +407,42 @@ local function primeProfileWatchState(node)
     end
 end
 
+local function queueReload(node, showLoader)
+    local framework = node and node.app and node.app.framework or nil
+
+    if nodeIsOpen(node) ~= true or node.state.reloadQueued == true or node.state.loading == true or node.state.saving == true then
+        return false
+    end
+
+    node.state.reloadQueued = true
+    node.state.loading = true
+    node.state.error = nil
+
+    if node.app and node.app._invalidateForm then
+        node.app:_invalidateForm()
+    end
+
+    if framework and framework.callbackNow then
+        framework:callbackNow(function()
+            if type(node.state) ~= "table" then
+                return
+            end
+
+            node.state.reloadQueued = false
+
+            if nodeIsOpen(node) ~= true or node.state.saving == true then
+                return
+            end
+
+            node:reload(showLoader)
+        end, "immediate")
+        return true
+    end
+
+    node.state.reloadQueued = false
+    return node:reload(showLoader)
+end
+
 local function handleProfileChangeReload(node)
     local kinds = watchedProfileKinds(node)
     local index
@@ -417,7 +474,7 @@ local function handleProfileChangeReload(node)
             if (kind == "pid" and node.spec.refreshOnProfileChange == true) or
                 (kind == "rate" and node.spec.refreshOnRateChange == true) or
                 (kind == "battery" and node.spec.refreshOnBatteryProfileChange == true) then
-                node:reload(true)
+                queueReload(node, true)
                 return true
             end
         end
@@ -959,12 +1016,13 @@ local function matrixColumnKey(column, index)
     return tostring((type(column) == "table" and column.id) or index)
 end
 
-local function matrixStartX(node, app)
-    local labels = node.state.labels or {}
+local function matrixStartX(node, app, labels)
     local width = app:_windowSize()
     local rowLabelWidth = resolveDimension(node.spec.layout and node.spec.layout.rowLabelWidth, width) or math.floor(width * 0.34)
     local index
     local maxWidth = 0
+
+    labels = labels or node.state.labels or {}
 
     for index = 1, #labels do
         maxWidth = math.max(maxWidth, measureTextWidth(labels[index].t or ""))
@@ -973,15 +1031,16 @@ local function matrixStartX(node, app)
     return math.max(rowLabelWidth, maxWidth + 18)
 end
 
-local function matrixRowLabelPos(node, app, row)
+local function matrixRowLabelPos(node, app, row, startX)
     local rowH = app.radio.navbuttonHeight or 30
     local rowY = app.radio.linePaddingTop or 0
-    local startX = matrixStartX(node, app)
     local labelText = tostring((type(row) == "table" and (row.t or row.title)) or "")
     local labelWidth = measureTextWidth(labelText)
     local align = tostring((node.spec.layout and node.spec.layout.rowLabelAlign) or "left")
     local inset = resolveDimension(node.spec.layout and node.spec.layout.rowLabelPadding, startX) or 0
     local x = 0
+
+    startX = tonumber(startX) or matrixStartX(node, app)
 
     if align == "right" then
         x = math.max(0, startX - labelWidth - inset)
@@ -1052,11 +1111,10 @@ local function hydrateMatrixField(node, field, row, column)
     return field
 end
 
-local function matrixMetrics(node, app, columns)
+local function matrixMetrics(node, app, columns, startX)
     local width = app:_windowSize()
     local gap = resolveDimension(node.spec.layout and node.spec.layout.slotGap, width) or 10
     local rightPadding = resolveDimension(node.spec.layout and node.spec.layout.rightPadding, width) or 12
-    local startX = matrixStartX(node, app)
     local count = math.max(1, #columns)
     local availableW = math.max(0, width - startX - rightPadding)
     local configuredCellW = resolveDimension(node.spec.layout and node.spec.layout.columnWidth, availableW)
@@ -1064,6 +1122,8 @@ local function matrixMetrics(node, app, columns)
     local usedW
     local blockX
     local pack
+
+    startX = tonumber(startX) or matrixStartX(node, app)
 
     if configuredCellW ~= nil and configuredCellW > 0 then
         cellW = math.max(0, configuredCellW)
@@ -1100,10 +1160,9 @@ local function matrixMetrics(node, app, columns)
     }
 end
 
-local function buildMatrixHeader(line, node, app, columns)
+local function buildMatrixHeader(line, node, app, columns, metrics)
     local rowH = app.radio.navbuttonHeight or 30
     local rowY = app.radio.linePaddingTop or 0
-    local metrics = matrixMetrics(node, app, columns)
     local align = tostring((node.spec.layout and node.spec.layout.columnAlign) or "center")
     local index
     local column
@@ -1111,6 +1170,8 @@ local function buildMatrixHeader(line, node, app, columns)
     local text
     local textWidth
     local textX
+
+    metrics = metrics or matrixMetrics(node, app, columns)
 
     for index = 1, #columns do
         column = columns[index]
@@ -1128,10 +1189,9 @@ local function buildMatrixHeader(line, node, app, columns)
     end
 end
 
-local function buildMatrixRow(line, node, app, row, columns, rowFields)
+local function buildMatrixRow(line, node, app, row, columns, rowFields, metrics, startX)
     local rowH = app.radio.navbuttonHeight or 30
     local rowY = app.radio.linePaddingTop or 0
-    local metrics = matrixMetrics(node, app, columns)
     local index
     local column
     local field
@@ -1140,7 +1200,10 @@ local function buildMatrixRow(line, node, app, row, columns, rowFields)
     local controlX
     local fieldAlign
 
-    form.addStaticText(line, matrixRowLabelPos(node, app, row), tostring((type(row) == "table" and (row.t or row.title)) or ""))
+    metrics = metrics or matrixMetrics(node, app, columns, startX)
+    startX = tonumber(startX) or metrics.startX
+
+    form.addStaticText(line, matrixRowLabelPos(node, app, row, startX), tostring((type(row) == "table" and (row.t or row.title)) or ""))
 
     for index = 1, #columns do
         column = columns[index]
@@ -1358,27 +1421,21 @@ local function buildFlexRow(line, node, app, row)
 end
 
 local function finishRead(node)
-    local currentBuildCount = node.app.formBuildCount or 0
-    local hasBuiltForm = (node.state.lastBuiltFormCount or 0) > 0
-
     prepareLayout(node)
     node.state.loaded = true
     node.state.loading = false
     node.state.error = nil
-    node.state.pendingLoaderClose = true
-    if hasBuiltForm == true then
-        node.state.pendingLoaderCloseBuild = currentBuildCount
-    else
-        node.state.pendingLoaderCloseBuild = currentBuildCount + 1
-    end
     node.state.resetDirtyAfterBuild = true
     updateDynamicTitle(node)
     refreshBuiltControls(node)
     releasePageApis(node, false)
-    if node.app and node.app.framework and node.app.framework.captureMemoryDebug then
-        node.app.framework:captureMemoryDebug("page_ready:" .. tostring(node.baseTitle or node.title or "msp"))
+    resumeDirtyAfterLoad(node, true)
+    if node.app and node.app.requestLoaderClose then
+        node.app:requestLoaderClose()
+    else
+        node.app.ui.clearProgressDialog(true)
     end
-    if hasBuiltForm ~= true then
+    if node.app and node.app._invalidateForm then
         node.app:_invalidateForm()
     end
 end
@@ -1394,7 +1451,7 @@ local function suspendDirtyDuringLoad(node)
     end
 end
 
-local function resumeDirtyAfterLoad(node, clearDirty)
+resumeDirtyAfterLoad = function(node, clearDirty)
     if node.state.dirtySuspended == true and node.app and node.app.resumeDirtyTracking then
         node.app:resumeDirtyTracking()
         node.state.dirtySuspended = false
@@ -1626,24 +1683,18 @@ function MspPage.create(spec)
                 saving = false,
                 error = nil,
                 needsInitialLoad = true,
-                pendingLoaderClose = false,
-                pendingLoaderCloseBuild = 0,
-                lastBuiltFormCount = 0,
+                reloadQueued = false,
                 resetDirtyAfterBuild = false,
-                dirtySuspended = false
+                dirtySuspended = false,
+                closed = false
             }
         }
         local navKey
-        local okPrepare
 
         for navKey, enabled in pairs(spec.navButtons or {}) do
             node.navButtons[navKey] = enabled
         end
 
-        okPrepare = ensureApis(node)
-        if okPrepare then
-            prepareLayout(node)
-        end
         primeProfileWatchState(node)
         updateDynamicTitle(node)
 
@@ -1661,17 +1712,19 @@ function MspPage.create(spec)
             local line
             local labelId
             local rowLookup
-
-            self.state.lastBuiltFormCount = app.formBuildCount or 0
+            local startX
+            local metrics
 
             if self.state.error then
                 line = form.addLine("Status")
-                form.addStaticText(line, nil, tostring(self.state.error))
+                form.addStaticText(line, nil, "Error")
+                line = form.addLine("")
+                form.addStaticText(line, wideStatusPos(app), tostring(self.state.error))
                 clearDirtyAfterBuildIfNeeded(self)
                 return
             end
 
-            if #fields == 0 then
+            if self.state.loaded ~= true then
                 line = form.addLine("Status")
                 form.addStaticText(line, nil, self.state.loading == true and "Loading..." or "Waiting...")
                 clearDirtyAfterBuildIfNeeded(self)
@@ -1688,9 +1741,11 @@ function MspPage.create(spec)
             end
 
             if self.spec.layout and self.spec.layout.kind == "matrix" then
+                startX = matrixStartX(self, app, labels)
+                metrics = matrixMetrics(self, app, columns, startX)
                 if #columns > 0 then
                     line = form.addLine("")
-                    buildMatrixHeader(line, self, app, columns)
+                    buildMatrixHeader(line, self, app, columns, metrics)
                 end
 
                 rowLookup = matrixFieldLookup(fields)
@@ -1698,7 +1753,7 @@ function MspPage.create(spec)
                 for index = 1, #labels do
                     label = labels[index]
                     line = form.addLine("")
-                    buildMatrixRow(line, self, app, label, columns, rowLookup[matrixRowKey(label, index)])
+                    buildMatrixRow(line, self, app, label, columns, rowLookup[matrixRowKey(label, index)], metrics, startX)
                 end
                 clearDirtyAfterBuildIfNeeded(self)
                 return
@@ -1758,8 +1813,6 @@ function MspPage.create(spec)
                 failRead(self, err)
                 return false
             end
-
-            prepareLayout(self)
 
             self.state.loading = true
             self.state.error = nil
@@ -1837,19 +1890,8 @@ function MspPage.create(spec)
         function node:wakeup()
             if self.state.needsInitialLoad == true and self.state.loading ~= true and self.state.loaded ~= true then
                 self.state.needsInitialLoad = false
-                self:reload(true)
+                queueReload(self, true)
                 return
-            end
-
-            if self.state.pendingLoaderClose == true and self.app.formDirty ~= true and (self.app.formBuildCount or 0) >= (self.state.pendingLoaderCloseBuild or 0) then
-                self.state.pendingLoaderClose = false
-                self.state.pendingLoaderCloseBuild = 0
-                resumeDirtyAfterLoad(self, true)
-                if self.app.requestLoaderClose then
-                    self.app:requestLoaderClose()
-                else
-                    self.app.ui.clearProgressDialog(true)
-                end
             end
 
             if handleProfileChangeReload(self) == true then
@@ -1891,10 +1933,10 @@ function MspPage.create(spec)
         function node:close()
             local index
 
+            self.state.closed = true
+            self.state.reloadQueued = false
             self.state.loading = false
             self.state.saving = false
-            self.state.pendingLoaderClose = false
-            self.state.pendingLoaderCloseBuild = 0
             self.state.needsInitialLoad = false
 
             releasePageApis(self, true)

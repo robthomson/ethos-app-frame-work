@@ -156,9 +156,6 @@ function controller:addNavigationButtons()
         end
         if app then
             app.navFields[def.key] = field
-            if app.formHost and app.formHost._sync then
-                app.formHost:_sync()
-            end
         end
         xRight = bx - 5
     end
@@ -179,9 +176,6 @@ function controller:addHeader(node, menuRootPath)
             app.headerTitleField = field
             if app.formHost and app.formHost.state then
                 app.formHost.state.headerTitleField = field
-                if app.formHost._sync then
-                    app.formHost:_sync()
-                end
             end
         end
     end

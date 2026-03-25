@@ -307,6 +307,16 @@ function SensorsTask:_transportName()
     return self.framework.session:get("telemetryType", "disconnected")
 end
 
+function SensorsTask:_appActive()
+    if self.framework and self.framework.isAppActive then
+        return self.framework:isAppActive() == true
+    end
+
+    return self.framework
+        and self.framework.session
+        and self.framework.session:get("appActive", false) == true
+end
+
 function SensorsTask:_resetTransportProvider()
     if self.transportProvider and self.transportProvider.reset then
         self.transportProvider:reset()
@@ -405,12 +415,13 @@ function SensorsTask:wakeup()
     local session = self.framework.session
     local now = os.clock()
     local phase
+    local appActive = self:_appActive()
 
     self:_muteSensorLostDuringStartup(now)
-    if mspProvider and mspProvider.seedStartupPlaceholders then
+    if not appActive and mspProvider and mspProvider.seedStartupPlaceholders then
         mspProvider:seedStartupPlaceholders(now)
     end
-    if mspProvider and mspProvider.refresh then
+    if not appActive and mspProvider and mspProvider.refresh then
         mspProvider:refresh(now)
     end
     if smartProvider and smartProvider.refresh then
@@ -425,8 +436,10 @@ function SensorsTask:wakeup()
         return
     end
 
-    self:_primeTelemetryConfig(now)
-    self:_primeBatteryConfig(now)
+    if not appActive then
+        self:_primeTelemetryConfig(now)
+        self:_primeBatteryConfig(now)
+    end
 
     if transportProvider and transportProvider.wakeup then
         transportProvider:wakeup()
@@ -435,7 +448,7 @@ function SensorsTask:wakeup()
     self.wakeupTick = (self.wakeupTick or 0) + 1
     phase = self.wakeupTick % 2
 
-    if phase == 0 and mspProvider and mspProvider.wakeup then
+    if not appActive and phase == 0 and mspProvider and mspProvider.wakeup then
         mspProvider:wakeup()
     end
 

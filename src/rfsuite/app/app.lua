@@ -729,7 +729,10 @@ function App:_pruneMaskCacheForNode(node)
 end
 
 function App:_afterNodeChanged()
-    return self:_pruneMaskCacheForNode(self.currentNode)
+    -- Avoid doing cache pruning on the page/menu transition path.
+    -- On real radios the Ethos watchdog can kill the whole script if this
+    -- extra housekeeping lands in an already busy callback.
+    return true
 end
 
 function App:_reportNodeError(context, err)
@@ -1821,10 +1824,22 @@ function App:_makeLoadErrorNode(item, breadcrumb, err)
                 w = math.floor(width * 0.85),
                 h = radio.navbuttonHeight or 30
             }
+            local widePos = {
+                x = 8,
+                y = radio.linePaddingTop or 0,
+                w = math.max(40, width - 16),
+                h = radio.navbuttonHeight or 30
+            }
 
             for _, entry in ipairs(details) do
                 local line = form.addLine(entry.title)
-                form.addStaticText(line, pos, tostring(entry.value or ""))
+
+                if entry.id == "error" then
+                    line = form.addLine("")
+                    form.addStaticText(line, widePos, tostring(entry.value or ""))
+                else
+                    form.addStaticText(line, pos, tostring(entry.value or ""))
+                end
             end
         end,
         items = details

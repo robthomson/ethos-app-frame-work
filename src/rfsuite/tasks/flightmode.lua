@@ -15,6 +15,16 @@ function FlightModeTask:_telemetry()
     return self.framework:getTask("telemetry")
 end
 
+function FlightModeTask:_appActive()
+    if self.framework and self.framework.isAppActive then
+        return self.framework:isAppActive() == true
+    end
+
+    return self.framework
+        and self.framework.session
+        and self.framework.session:get("appActive", false) == true
+end
+
 function FlightModeTask:_inFlight()
     local telemetry
     local governor
@@ -82,6 +92,10 @@ function FlightModeTask:init(framework)
 end
 
 function FlightModeTask:wakeup()
+    if self:_appActive() then
+        return
+    end
+
     local mode = self:_determineMode()
 
     if mode ~= self.lastFlightMode then
