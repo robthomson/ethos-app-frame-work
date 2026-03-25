@@ -534,6 +534,23 @@ local function paintAlignmentView(node)
     local rotorC
     local rotorD
     local fuselage
+    local nwx
+    local nwy
+    local nwz
+    local twx
+    local twy
+    local twz
+    local npx
+    local npy
+    local tpx
+    local tpy
+    local dx
+    local dy
+    local mag
+    local ux
+    local uy
+    local primary
+    local secondary
 
     if not (lcd and lcd.getWindowSize and form and form.height) then
         return
@@ -587,6 +604,48 @@ local function paintAlignmentView(node)
     pitchR = math.rad(-(view.live.pitch + offsets.pitch))
     yawR = math.rad(-((view.live.yaw + offsets.yaw) - view.viewYawOffset))
     rollR = math.rad(-(view.live.roll + offsets.roll))
+
+    nwx, nwy, nwz = rotatePoint(2.2, 0.0, 0.0, pitchR, yawR, rollR)
+    twx, twy, twz = rotatePoint(-2.2, 0.0, 0.0, pitchR, yawR, rollR)
+    npx, npy = projectPoint(nwx, nwy, nwz, 0, 0, 1.0)
+    tpx, tpy = projectPoint(twx, twy, twz, 0, 0, 1.0)
+    primary = "@i18n(app.modules.alignment.nose_level)@"
+    secondary = ""
+
+    if npx and npy and tpx and tpy then
+        dx = npx - tpx
+        dy = -(npy - tpy)
+        mag = math.sqrt((dx * dx) + (dy * dy))
+        if mag > 0.001 then
+            ux = dx / mag
+            uy = dy / mag
+
+            if uy > 0.35 then
+                primary = "@i18n(app.modules.alignment.nose_up)@"
+            elseif uy < -0.35 then
+                primary = "@i18n(app.modules.alignment.nose_down)@"
+            end
+
+            if ux > 0.35 then
+                secondary = "@i18n(app.modules.alignment.leaning_left)@"
+            elseif ux < -0.35 then
+                secondary = "@i18n(app.modules.alignment.leaning_right)@"
+            end
+        end
+    end
+
+    if lcd.font then
+        lcd.font(FONT_STD)
+    end
+    lcd.color(accent)
+    lcd.drawText(12, panelY + panelH - 40, primary, LEFT)
+    if secondary ~= "" then
+        if lcd.font then
+            lcd.font(FONT_XS)
+        end
+        lcd.color(mainColor)
+        lcd.drawText(12, panelY + panelH - 18, secondary, LEFT)
+    end
 
     nose = {2.35, 0.0, -0.02}
     tail = {-2.65, 0.0, 0.03}
@@ -776,6 +835,15 @@ function BasePage:open(ctx)
                 recenterYawView(node)
             end
         )
+    end
+
+    function node:event(_, value)
+        if value == 128 then
+            recenterYawView(self)
+            return true
+        end
+
+        return false
     end
 
     function node:wakeup(app)
