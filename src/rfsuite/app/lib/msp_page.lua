@@ -509,7 +509,7 @@ local function handleProfileChangeReload(node)
             if (kind == "pid" and node.spec.refreshOnProfileChange == true) or
                 (kind == "rate" and node.spec.refreshOnRateChange == true) or
                 (kind == "battery" and node.spec.refreshOnBatteryProfileChange == true) then
-                queueReload(node, true)
+                node:reload(true)
                 return true
             end
         end
@@ -1838,16 +1838,31 @@ function MspPage.create(spec)
             return self.state.loaded == true and self.state.loading ~= true and self.state.saving ~= true and self.state.error == nil
         end
 
-        function node:reload(showLoader, apisReady)
+        function node:reload(showLoader, apisReady, deferStart)
+            local ok
+            local err
             local shouldShowLoader = showLoader ~= false
 
-            if apisReady ~= true then
+            if type(showLoader) == "table" and showLoader.framework and apisReady == nil then
+                shouldShowLoader = true
+            end
+
+            if deferStart == true and apisReady ~= true then
                 return queueReload(self, showLoader)
+            end
+
+            if apisReady ~= true then
+                ok, err = ensureApis(self)
+                if not ok then
+                    failRead(self, err)
+                    return false
+                end
             end
 
             self.state.reloadQueued = false
             self.state.reloadPrepared = false
             self.state.loading = true
+            self.state.loaded = false
             self.state.error = nil
             suspendDirtyDuringLoad(self)
 
@@ -1923,7 +1938,7 @@ function MspPage.create(spec)
         function node:wakeup()
             if self.state.needsInitialLoad == true and self.state.loading ~= true and self.state.loaded ~= true then
                 self.state.needsInitialLoad = false
-                queueReload(self, true)
+                self:reload(true, nil, true)
                 return
             end
 
