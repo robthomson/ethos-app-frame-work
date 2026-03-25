@@ -672,6 +672,8 @@ local function mergedField(node, fieldSpec)
     rawValue = api and api.readValue and api.readValue(fieldSpec.apikey) or nil
     if rawValue ~= nil then
         merged.value = fieldControlValue(merged, rawValue)
+    elseif node and node.spec and node.spec.buildFormWhileLoading == true and node.state and node.state.loaded ~= true then
+        merged.value = nil
     elseif merged.value == nil then
         merged.value = fieldDefaultValue(merged)
     end
@@ -911,6 +913,18 @@ local function applyControlValue(control, value)
     end
 
     return false
+end
+
+local function setBuiltControlsEnabled(node, enabled)
+    local index
+    local field
+
+    for index = 1, #(node and node.state and node.state.fields or {}) do
+        field = node.state.fields[index]
+        if field and field.control and field.control.enable then
+            pcall(field.control.enable, field.control, enabled == true)
+        end
+    end
 end
 
 local function refreshBuiltControls(node)
@@ -1485,6 +1499,7 @@ local function finishRead(node)
     node.state.reloadFullPending = false
     updateDynamicTitle(node)
     refreshBuiltControls(node)
+    setBuiltControlsEnabled(node, true)
     releasePageApis(node, false)
     resumeDirtyAfterLoad(node, true)
     if node.app and node.app.requestLoaderClose then
@@ -1783,10 +1798,16 @@ function MspPage.create(spec)
             end
 
             if self.state.loaded ~= true then
-                line = form.addLine("Status")
-                form.addStaticText(line, nil, self.state.loading == true and "Loading..." or "Waiting...")
-                clearDirtyAfterBuildIfNeeded(self)
-                return
+                if self.spec.buildFormWhileLoading == true then
+                    if #(self.state.fields or {}) == 0 and #(self.state.labels or {}) == 0 and #(self.state.rows or {}) == 0 and #(self.state.columns or {}) == 0 then
+                        prepareLayout(self)
+                    end
+                else
+                    line = form.addLine("Status")
+                    form.addStaticText(line, nil, self.state.loading == true and "Loading..." or "Waiting...")
+                    clearDirtyAfterBuildIfNeeded(self)
+                    return
+                end
             end
 
             if self.spec.layout and self.spec.layout.kind == "rows" then
@@ -1852,6 +1873,10 @@ function MspPage.create(spec)
                     line = form.addLine(tostring(field.t or field.apikey or "Field"))
                     field.control = buildControlAtPosition(line, field, nil)
                 end
+            end
+
+            if self.state.loaded ~= true then
+                setBuiltControlsEnabled(self, false)
             end
 
             clearDirtyAfterBuildIfNeeded(self)
