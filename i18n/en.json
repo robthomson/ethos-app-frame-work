@@ -103,6 +103,12 @@
       }
     },
     "BATTERY_INI": {
+      "alert_type": {
+        "english": "Select which voltage source should trigger the alert, or disable the alert entirely.",
+        "max_length": 80,
+        "needs_translation": false,
+        "translation": "Select which voltage source should trigger the alert, or disable the alert entirely."
+      },
       "alert_bec": {
         "english": "BEC",
         "max_length": 3,
@@ -121,11 +127,29 @@
         "needs_translation": false,
         "translation": "RXBatt"
       },
+      "becalertvalue": {
+        "english": "Minimum BEC voltage before the BEC alert is triggered.",
+        "max_length": 56,
+        "needs_translation": false,
+        "translation": "Minimum BEC voltage before the BEC alert is triggered."
+      },
       "calcfuel_local": {
         "english": "Calculate Fuel Using",
         "max_length": 20,
         "needs_translation": false,
         "translation": "Calculate Fuel Using"
+      },
+      "flighttime": {
+        "english": "Flight time in seconds before the timer alert is triggered.",
+        "max_length": 58,
+        "needs_translation": false,
+        "translation": "Flight time in seconds before the timer alert is triggered."
+      },
+      "rxalertvalue": {
+        "english": "Minimum receiver battery voltage before the RX battery alert is triggered.",
+        "max_length": 74,
+        "needs_translation": false,
+        "translation": "Minimum receiver battery voltage before the RX battery alert is triggered."
       },
       "tbl_auto": {
         "english": "Auto",
@@ -162,6 +186,26 @@
         "max_length": 14,
         "needs_translation": false,
         "translation": "Voltage Sensor"
+      }
+    },
+    "FLIGHT_STATS_INI": {
+      "flightcount": {
+        "english": "Total number of recorded flights for this model.",
+        "max_length": 47,
+        "needs_translation": false,
+        "translation": "Total number of recorded flights for this model."
+      },
+      "lastflighttime": {
+        "english": "Duration in seconds of the most recent recorded flight.",
+        "max_length": 56,
+        "needs_translation": false,
+        "translation": "Duration in seconds of the most recent recorded flight."
+      },
+      "totalflighttime": {
+        "english": "Total accumulated flight time in seconds for this model.",
+        "max_length": 58,
+        "needs_translation": false,
+        "translation": "Total accumulated flight time in seconds for this model."
       }
     },
     "ESC_PARAMETERS_FLYROTOR": {

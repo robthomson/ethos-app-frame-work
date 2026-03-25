@@ -10,7 +10,6 @@ local core = context.core
 local factory = context.factory
 
 local API_NAME = "FLIGHT_STATS_INI"
-local INI_FILE = "SCRIPTS:/" .. rfsuite.config.preferences .. "/models/" .. rfsuite.session.mcu_id .. ".ini"
 local INI_SECTION = "general"
 
 local ini = rfsuite.ini
@@ -28,8 +27,42 @@ local MSP_API_STRUCTURE_READ_DATA = {
 
 local READ_STRUCT = core.prepareStructureData(MSP_API_STRUCTURE_READ_DATA)
 
+local function resolveIniFile()
+    local modelPreferencesFile = rfsuite.session.modelPreferencesFile
+    local preferencesRoot
+    local mcuId
+
+    if type(modelPreferencesFile) == "string" and modelPreferencesFile ~= "" then
+        return modelPreferencesFile
+    end
+
+    preferencesRoot = rfsuite.config.preferences
+    mcuId = rfsuite.session.mcu_id
+    if type(preferencesRoot) == "string" and preferencesRoot ~= "" and type(mcuId) == "string" and mcuId ~= "" then
+        return "SCRIPTS:/" .. preferencesRoot .. "/models/" .. mcuId .. ".ini"
+    end
+
+    return nil
+end
+
+local function resolveIniTable()
+    local modelPreferences = rfsuite.session.modelPreferences
+    local iniFile
+
+    if type(modelPreferences) == "table" then
+        return modelPreferences
+    end
+
+    iniFile = resolveIniFile()
+    if iniFile then
+        return ini.load_ini_file(iniFile) or {}
+    end
+
+    return {}
+end
+
 local function loadParsedFromINI()
-    local tbl = ini.load_ini_file(INI_FILE) or {}
+    local tbl = resolveIniTable()
     local parsed = {}
     for _, entry in ipairs(MSP_API_STRUCTURE_READ_DATA) do
         parsed[entry.field] = tonumber(ini.getvalue(tbl, INI_SECTION, entry.field)) or entry.simResponse[1] or 0
@@ -39,6 +72,7 @@ end
 
 return factory.create({
     name = API_NAME,
+    readStructure = READ_STRUCT,
     customRead = function(state, emitComplete)
         local parsed = loadParsedFromINI()
         state.mspData = {
@@ -54,10 +88,18 @@ return factory.create({
         return true
     end,
     customWrite = function(_, state, emitComplete, emitError)
+        local iniFile = resolveIniFile()
         local msg = "@i18n(app.modules.profile_select.save_prompt_local)@"
+        local tbl
+
         rfsuite.app.ui.progressDisplaySave(msg:gsub("%?$", "."))
 
-        local tbl = ini.load_ini_file(INI_FILE) or {}
+        if not iniFile then
+            emitError(nil, "Model preferences file unavailable")
+            return false, "model_preferences_file_unavailable"
+        end
+
+        tbl = resolveIniTable()
         tbl.general = tbl.general or {}
 
         for k, v in pairs(state.payloadData) do
@@ -68,9 +110,9 @@ return factory.create({
             end
         end
 
-        local ok, err = ini.save_ini_file(INI_FILE, tbl)
+        local ok, err = ini.save_ini_file(iniFile, tbl)
         if not ok then
-            emitError(nil, err or ("Failed to save INI: " .. INI_FILE))
+            emitError(nil, err or ("Failed to save INI: " .. iniFile))
             return false, err
         end
 

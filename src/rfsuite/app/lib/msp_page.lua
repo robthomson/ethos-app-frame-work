@@ -938,6 +938,7 @@ local function refreshBuiltControls(node)
     for index = 1, #(node.state.fields or {}) do
         field = node.state.fields[index]
         if field and field.control then
+            applyFieldDecoration(field.control, field)
             applyControlValue(field.control, field.value)
         end
     end
