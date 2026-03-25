@@ -367,12 +367,31 @@ local function selectedSensorIds(config)
     return selected
 end
 
+local function refreshSensorControls(node)
+    local _, sensorId
+
+    for _, sensorId in ipairs(SENSOR_IDS) do
+        updateConflictControl(node, sensorId)
+    end
+end
+
 local function applyDefaultSensors(node)
     local telemetryTask = node.app.framework:getTask("telemetry")
     local defaultSet = {}
     local sensor
     local sensorId
     local _, id
+
+    if node.app and node.app.ui and node.app.ui.showLoader then
+        node.app.ui.showLoader({
+            kind = "progress",
+            title = node.title or "@i18n(app.modules.telemetry.name)@",
+            message = "Applying defaults.",
+            closeWhenIdle = false,
+            minVisibleFor = 0.25,
+            modal = true
+        })
+    end
 
     if telemetryTask and telemetryTask.listSensors then
         for _, sensor in ipairs(telemetryTask.listSensors() or {}) do
@@ -390,8 +409,15 @@ local function applyDefaultSensors(node)
     initialiseConflictState(node)
     node.state.defaultDirty = true
     refreshDirtyState(node)
-    if node.app and node.app._invalidateForm then
+    if next(node.state.sensorControls or {}) ~= nil then
+        refreshSensorControls(node)
+    elseif node.app and node.app._invalidateForm then
         node.app:_invalidateForm()
+    end
+    if node.app and node.app.requestLoaderClose then
+        node.app:requestLoaderClose()
+    elseif node.app and node.app.ui and node.app.ui.clearProgressDialog then
+        node.app.ui.clearProgressDialog(true)
     end
 end
 
@@ -581,6 +607,7 @@ local function startLoad(node, showLoader)
             title = node.title or "@i18n(app.modules.telemetry.name)@",
             message = "Loading values.",
             closeWhenIdle = false,
+            watchdogTimeout = 10.0,
             focusMenuOnClose = true,
             modal = true
         })
@@ -851,6 +878,7 @@ function Page:open(ctx)
             kind = "progress",
             message = "Loading values.",
             closeWhenIdle = false,
+            watchdogTimeout = 10.0,
             focusMenuOnClose = true,
             modal = true
         },
