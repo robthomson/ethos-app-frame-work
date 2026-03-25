@@ -157,6 +157,8 @@ end
 
 function queue:_requeueExpiredMessage(now, reason, transport, codec)
     local message = self.current
+    local requeueExpired
+    local maxExpireCount
 
     if not message then
         self:_finish(now)
@@ -172,12 +174,20 @@ function queue:_requeueExpiredMessage(now, reason, transport, codec)
 
     message._expireCount = (message._expireCount or 0) + 1
     message._lastExpireReason = reason
-
-    if message.expireHandler then
-        pcall(message.expireHandler, message, reason, message._expireCount, self.maxExpireCount or 0)
+    requeueExpired = message.requeueExpired
+    if requeueExpired == nil then
+        requeueExpired = self.requeueExpired
+    end
+    maxExpireCount = message.maxExpireCount
+    if maxExpireCount == nil then
+        maxExpireCount = self.maxExpireCount or 0
     end
 
-    if self.requeueExpired and message._expireCount <= (self.maxExpireCount or 0) then
+    if message.expireHandler then
+        pcall(message.expireHandler, message, reason, message._expireCount, maxExpireCount)
+    end
+
+    if requeueExpired and message._expireCount <= maxExpireCount then
         self.last = self.last + 1
         self.items[self.last] = message
         self:_finish(now)
@@ -198,6 +208,7 @@ function queue:process(transport, protocol, codec, now)
     local errorFlag
     local simulatorResponse
     local timeout
+    local maxRetries
     local intervalOk
     local backoffOk
     local sendOk
@@ -226,6 +237,10 @@ function queue:process(transport, protocol, codec, now)
 
     message = self.current
     timeout = message.timeout or self.timeout
+    maxRetries = message.maxRetries
+    if maxRetries == nil then
+        maxRetries = self.maxRetries
+    end
 
     if isSimulation() then
         simulatorResponse = resolveSimulatorResponse(message)
@@ -242,7 +257,7 @@ function queue:process(transport, protocol, codec, now)
     intervalOk = (not self.lastSentAt) or ((now - self.lastSentAt) >= self.mspInterval)
     backoffOk = (self.retryCount == 0) or ((now - self.lastSentAt) >= self.retryBackoff)
 
-    if self.retryCount <= self.maxRetries and intervalOk and backoffOk then
+    if self.retryCount <= maxRetries and intervalOk and backoffOk then
         sendOk = codec:sendRequest(message.command, message.payload or {})
         if sendOk then
             self.retryCount = self.retryCount + 1
@@ -272,7 +287,7 @@ function queue:process(transport, protocol, codec, now)
         return true
     end
 
-    if self.retryCount > self.maxRetries then
+    if self.retryCount > maxRetries then
         self:_notifyLog("timeout", message, nil, "max_retries")
         self:_requeueExpiredMessage(now, "max_retries", transport, codec)
         return true

@@ -41,6 +41,12 @@ return factory.create({
     writeStructure = MSP_API_STRUCTURE_WRITE,
     buildWritePayload = buildWritePayload,
     validateWrite = validateWrite,
+    resolveWriteTimeout = function()
+        return 1.0
+    end,
+    maxWriteRetries = 0,
+    maxWriteExpireCount = 0,
+    requeueWriteExpired = false,
     writeUuidFallback = true,
     initialRebuildOnWrite = false
 })

@@ -188,6 +188,9 @@ function factory.create(spec)
     local function write(suppliedPayload, ...)
         local payload = suppliedPayload
         local message
+        local maxRetries
+        local maxExpireCount
+        local requeueExpired
 
         if type(spec.customWrite) == "function" then
             return spec.customWrite(suppliedPayload, state, emitComplete, dispatchError, ...)
@@ -238,6 +241,27 @@ function factory.create(spec)
         end
         if type(spec.resolveWriteTimeout) == "function" then
             message.timeout = spec.resolveWriteTimeout(state, suppliedPayload, ...)
+        end
+        maxRetries = spec.maxWriteRetries
+        if type(spec.resolveWriteMaxRetries) == "function" then
+            maxRetries = spec.resolveWriteMaxRetries(state, suppliedPayload, ...)
+        end
+        if maxRetries ~= nil then
+            message.maxRetries = tonumber(maxRetries)
+        end
+        maxExpireCount = spec.maxWriteExpireCount
+        if type(spec.resolveWriteMaxExpireCount) == "function" then
+            maxExpireCount = spec.resolveWriteMaxExpireCount(state, suppliedPayload, ...)
+        end
+        if maxExpireCount ~= nil then
+            message.maxExpireCount = tonumber(maxExpireCount)
+        end
+        requeueExpired = spec.requeueWriteExpired
+        if type(spec.resolveWriteRequeueExpired) == "function" then
+            requeueExpired = spec.resolveWriteRequeueExpired(state, suppliedPayload, ...)
+        end
+        if requeueExpired ~= nil then
+            message.requeueExpired = requeueExpired == true
         end
 
         return enqueueMessage(message)
