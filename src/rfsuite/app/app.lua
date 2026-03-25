@@ -366,6 +366,7 @@ function App:init(framework)
     self.dirtySuspendDepth = 0
     self.returnMenuArmed = false
     self.pendingFocusRestore = false
+    self.emptyMenuBuildRetrySource = nil
     self.pendingDialogAction = nil
     self.pendingDialogActionReady = false
     self.modalDialogDepth = 0
@@ -628,19 +629,18 @@ function App:_loadMask(path)
 
     local cached = self.maskCache[path]
     if cached ~= nil then
-        if cached == false then
-            return nil
-        end
         return cached
     end
 
     local mask = lcd and lcd.loadMask and lcd.loadMask(path) or nil
-    self.maskCache[path] = mask or false
-    self.maskCacheOrder[#self.maskCacheOrder + 1] = path
+    if mask ~= nil then
+        self.maskCache[path] = mask
+        self.maskCacheOrder[#self.maskCacheOrder + 1] = path
 
-    while #self.maskCacheOrder > MASK_CACHE_MAX do
-        local evict = table.remove(self.maskCacheOrder, 1)
-        self.maskCache[evict] = nil
+        while #self.maskCacheOrder > MASK_CACHE_MAX do
+            local evict = table.remove(self.maskCacheOrder, 1)
+            self.maskCache[evict] = nil
+        end
     end
 
     return mask
@@ -1645,6 +1645,32 @@ function App:_syncMenuButtonStates()
     self.menuController:syncButtonStates(self.currentNode, self.currentNodeSource, self.buttonFields or {})
 end
 
+function App:_recoverEmptyMenuBuild()
+    if self:_nodeHasMenuItems(self.currentNode) ~= true then
+        self.emptyMenuBuildRetrySource = nil
+        return false
+    end
+
+    if next(self.buttonFields or {}) ~= nil then
+        self.emptyMenuBuildRetrySource = nil
+        return false
+    end
+
+    if self.emptyMenuBuildRetrySource == self.currentNodeSource then
+        return false
+    end
+
+    self.emptyMenuBuildRetrySource = self.currentNodeSource
+    if self.framework and self.framework.log and self.framework.log.warn then
+        self.framework.log:warn(
+            "Menu node '%s' built without button fields; retrying once",
+            tostring(self.currentNodeSource or "unknown")
+        )
+    end
+    self:_invalidateForm()
+    return true
+end
+
 function App:_collectNodeIconPaths(node)
     return self.menuController:collectNodeIconPaths(node)
 end
@@ -2109,6 +2135,9 @@ function App:wakeup()
         self:_refreshMenuAccess()
     end
     self:_rebuildFormIfNeeded()
+    if self:_recoverEmptyMenuBuild() == true then
+        return
+    end
     if self:_nodeHasMenuItems(self.currentNode) == true then
         self:_syncMenuButtonStates()
     end
