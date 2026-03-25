@@ -252,7 +252,6 @@ function MSPTask:_formatTransferStatus(message, suffix)
     local mode
     local target
     local command
-    local apiName
     local text
 
     if type(message) ~= "table" then
@@ -266,15 +265,15 @@ function MSPTask:_formatTransferStatus(message, suffix)
     end
 
     command = message.command
-    apiName = message.apiName or message.apiname
-    target = apiName and tostring(apiName) or (command ~= nil and tostring(command) or nil)
+    target = command ~= nil and tostring(command) or nil
+    if target == nil or target == "" then
+        target = message.apiName or message.apiname
+        target = target and tostring(target) or nil
+    end
     text = "MSP " .. tostring(mode)
 
     if target and target ~= "" then
         text = text .. " " .. target
-    end
-    if apiName and command ~= nil and tostring(apiName) ~= tostring(command) then
-        text = text .. " (" .. tostring(command) .. ")"
     end
     if suffix and suffix ~= "" then
         text = text .. " " .. suffix
