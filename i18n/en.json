@@ -14,6 +14,26 @@
         "translation": "Use to trim if the heli drifts in one of the stabilized modes (angle, horizon, etc.)."
       }
     },
+    "BOARD_ALIGNMENT_CONFIG": {
+      "pitch_degrees": {
+        "english": "Sets the board pitch mounting offset in degrees.",
+        "max_length": 47,
+        "needs_translation": false,
+        "translation": "Sets the board pitch mounting offset in degrees."
+      },
+      "roll_degrees": {
+        "english": "Sets the board roll mounting offset in degrees.",
+        "max_length": 46,
+        "needs_translation": false,
+        "translation": "Sets the board roll mounting offset in degrees."
+      },
+      "yaw_degrees": {
+        "english": "Sets the board yaw mounting offset in degrees.",
+        "max_length": 45,
+        "needs_translation": false,
+        "translation": "Sets the board yaw mounting offset in degrees."
+      }
+    },
     "BATTERY_CONFIG": {
       "batteryCapacity": {
         "english": "The milliamp hour capacity of your battery.",
@@ -2498,6 +2518,26 @@
         "max_length": 2,
         "needs_translation": false,
         "translation": "ON"
+      }
+    },
+    "SENSOR_ALIGNMENT": {
+      "gyro_1_alignment": {
+        "english": "Preserves the configured alignment for the first gyro sensor.",
+        "max_length": 59,
+        "needs_translation": false,
+        "translation": "Preserves the configured alignment for the first gyro sensor."
+      },
+      "gyro_2_alignment": {
+        "english": "Preserves the configured alignment for the second gyro sensor.",
+        "max_length": 60,
+        "needs_translation": false,
+        "translation": "Preserves the configured alignment for the second gyro sensor."
+      },
+      "mag_alignment": {
+        "english": "Sets the magnetometer alignment relative to the flight controller.",
+        "max_length": 65,
+        "needs_translation": false,
+        "translation": "Sets the magnetometer alignment relative to the flight controller."
       }
     },
     "RXFAIL_CONFIG": {
