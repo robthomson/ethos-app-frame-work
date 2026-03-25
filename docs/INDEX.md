@@ -38,6 +38,12 @@ Learn the architecture and improvements:
    - When to use `matrix`
    - Example module based on PID Bandwidth
 
+4. **[RADIO_STABILITY.md](./RADIO_STABILITY.md)** - Radio watchdog and page-porting rules
+   - Hot-path pitfalls to avoid
+   - Callback choice guidance
+   - Reload and MSP polling rules
+   - Porting checklist for new pages
+
 ---
 
 ## 🛠️ Building Features (1-4 hours per step)
@@ -104,6 +110,7 @@ ethos-app-frame-work/
 │   ├── README.md                ← Full guide
 │   ├── ARCHITECTURE.md          ← Design details
 │   ├── BEFORE_AFTER.md          ← Old vs new
+│   ├── RADIO_STABILITY.md       ← Radio watchdog guidance
 │   ├── IMPLEMENTATION.md        ← Build steps
 │   └── INDEX.md                 ← This file
 │
@@ -186,6 +193,9 @@ ethos-app-frame-work/
 
 **...optimize memory and CPU?**
 → ARCHITECTURE.md "Memory & CPU Optimization" + QUICK_REFERENCE.md "Performance Tips"
+
+**...avoid radio-only watchdogs or flaky first-load ports?**
+→ RADIO_STABILITY.md
 
 **...debug an issue?**
 → QUICK_REFERENCE.md "Debugging" section

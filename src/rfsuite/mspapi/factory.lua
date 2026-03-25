@@ -258,18 +258,42 @@ function factory.create(spec)
         return state.mspWriteComplete
     end
 
-    local function readValue(fieldName)
+    local readValue
+    local getFieldMap
+    local describeField
+    local setValue
+
+    readValue = function(fieldName)
         local d = state.mspData
+        local field
+        local parentValue
+
         if d and d.parsed then
-            return d.parsed[fieldName]
+            if d.parsed[fieldName] ~= nil then
+                return d.parsed[fieldName]
+            end
+
+            field = getFieldMap()[fieldName]
+            if type(field) == "table" and type(field.bitmapParent) == "string" then
+                parentValue = d.parsed[field.bitmapParent]
+                if parentValue ~= nil then
+                    parentValue = tonumber(parentValue) or 0
+                    return (parentValue >> (tonumber(field.bitmapBit) or 0)) & 1
+                end
+            end
         end
+
         return nil
     end
 
-    local function getFieldMap()
+    getFieldMap = function()
         local structure
         local index
         local field
+        local bitIndex
+        local bit
+        local composite
+        local bitmapField
 
         if fieldMap ~= nil then
             return fieldMap
@@ -282,13 +306,30 @@ function factory.create(spec)
             field = structure[index]
             if type(field) == "table" and type(field.field) == "string" and field.field ~= "" then
                 fieldMap[field.field] = field
+                if type(field.bitmap) == "table" then
+                    for bitIndex = 1, #field.bitmap do
+                        bit = field.bitmap[bitIndex]
+                        if type(bit) == "table" and type(bit.field) == "string" and bit.field ~= "" then
+                            composite = field.field .. "->" .. bit.field
+                            bitmapField = {}
+                            for key, value in pairs(bit) do
+                                bitmapField[key] = value
+                            end
+                            bitmapField.field = composite
+                            bitmapField.bitmapParent = field.field
+                            bitmapField.bitmapBit = bitIndex - 1
+                            bitmapField.bitmapSourceField = bit.field
+                            fieldMap[composite] = bitmapField
+                        end
+                    end
+                end
             end
         end
 
         return fieldMap
     end
 
-    local function describeField(fieldName)
+    describeField = function(fieldName)
         if type(fieldName) ~= "string" or fieldName == "" then
             return nil
         end
@@ -296,7 +337,33 @@ function factory.create(spec)
         return getFieldMap()[fieldName]
     end
 
-    local function setValue(fieldName, value)
+    setValue = function(fieldName, value)
+        local field = getFieldMap()[fieldName]
+        local parentName
+        local bit
+        local mask
+        local parentValue
+        local numericValue
+
+        if type(field) == "table" and type(field.bitmapParent) == "string" then
+            parentName = field.bitmapParent
+            bit = tonumber(field.bitmapBit) or 0
+            mask = 1 << bit
+            parentValue = tonumber(state.payloadData[parentName])
+            if parentValue == nil then
+                parentValue = tonumber(readValue(parentName)) or 0
+            end
+            numericValue = tonumber(value) or 0
+
+            if numericValue ~= 0 then
+                state.payloadData[parentName] = parentValue | mask
+            else
+                state.payloadData[parentName] = parentValue & (~mask)
+            end
+
+            return
+        end
+
         state.payloadData[fieldName] = value
     end
 
