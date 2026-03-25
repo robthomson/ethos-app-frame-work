@@ -59,6 +59,17 @@ local function copyTable(source)
     return out
 end
 
+local function mergeTable(base, override)
+    local out = copyTable(base)
+    local key
+
+    for key, value in pairs(override or {}) do
+        out[key] = value
+    end
+
+    return out
+end
+
 local function decimalInc(decimals)
     return utils.decimalInc(decimals) or 1
 end
@@ -1720,6 +1731,14 @@ function MspPage.create(spec)
     local Page = {}
 
     function Page:open(ctx)
+        local defaultLoaderOnEnter = {
+            kind = "progress",
+            message = "Loading values.",
+            closeWhenIdle = false,
+            transferInfo = true,
+            focusMenuOnClose = true,
+            modal = true
+        }
         local node = {
             spec = spec or {},
             app = ctx.app,
@@ -1727,15 +1746,8 @@ function MspPage.create(spec)
             title = ctx.item.title or spec.title or "MSP Page",
             subtitle = ctx.item.subtitle or spec.subtitle or "MSP-backed settings",
             breadcrumb = ctx.breadcrumb,
-            showLoaderOnEnter = true,
-            loaderOnEnter = {
-                kind = "progress",
-                message = "Loading values.",
-                closeWhenIdle = false,
-                transferInfo = true,
-                focusMenuOnClose = true,
-                modal = true
-            },
+            showLoaderOnEnter = spec.showLoaderOnEnter ~= false,
+            loaderOnEnter = mergeTable(defaultLoaderOnEnter, spec.loaderOnEnter),
             navButtons = {
                 menu = DEFAULT_NAV.menu,
                 save = DEFAULT_NAV.save,
@@ -1921,15 +1933,11 @@ function MspPage.create(spec)
             suspendDirtyDuringLoad(self)
 
             if shouldShowLoader == true then
-                beginLoader(self, {
+                beginLoader(self, mergeTable(self.loaderOnEnter, {
                     kind = "progress",
                     title = self.baseTitle,
-                    message = "Loading values.",
-                    closeWhenIdle = false,
-                    transferInfo = true,
-                    focusMenuOnClose = true,
-                    modal = true
-                })
+                    message = "Loading values."
+                }))
             end
 
             return runRead(self, 1)

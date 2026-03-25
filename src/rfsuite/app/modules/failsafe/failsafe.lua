@@ -118,6 +118,9 @@ end
 return MspPage.create({
     title = "@i18n(app.modules.failsafe.name)@",
     buildFormWhileLoading = true,
+    loaderOnEnter = {
+        watchdogTimeout = 10.0
+    },
     eepromWrite = true,
     help = {
         "@i18n(app.modules.failsafe.help_p1)@"
