@@ -13,6 +13,17 @@ local pairs = pairs
 local error = error
 local os_clock = os.clock
 
+local function shallowCopyTable(source)
+    local out = {}
+    local key
+
+    for key, value in pairs(source or {}) do
+        out[key] = value
+    end
+
+    return out
+end
+
 local function getMspHelper()
     return context.msp and context.msp.mspHelper or nil
 end
@@ -187,6 +198,7 @@ function factory.create(spec)
 
     local function write(suppliedPayload, ...)
         local payload = suppliedPayload
+        local payloadData = state.payloadData
         local message
         local maxRetries
         local maxExpireCount
@@ -215,7 +227,13 @@ function factory.create(spec)
             if spec.buildWritePayload then
                 local helper = getMspHelper()
                 local buildErr
-                payload, buildErr = spec.buildWritePayload(state.payloadData, state.mspData, helper, state, ...)
+                if state.rebuildOnWrite == true and type(state.mspData) == "table" and type(state.mspData.parsed) == "table" then
+                    payloadData = shallowCopyTable(state.mspData.parsed)
+                    for key, value in pairs(state.payloadData or {}) do
+                        payloadData[key] = value
+                    end
+                end
+                payload, buildErr = spec.buildWritePayload(payloadData, state.mspData, helper, state, ...)
                 if payload == nil then
                     dispatchError(nil, buildErr or "build_payload_failed")
                     return false, buildErr or "build_payload_failed"
@@ -344,6 +362,9 @@ function factory.create(spec)
                             bitmapField.bitmapBit = bitIndex - 1
                             bitmapField.bitmapSourceField = bit.field
                             fieldMap[composite] = bitmapField
+                            if fieldMap[bit.field] == nil then
+                                fieldMap[bit.field] = bitmapField
+                            end
                         end
                     end
                 end

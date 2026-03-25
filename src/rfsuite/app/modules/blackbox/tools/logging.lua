@@ -36,6 +36,17 @@ local function findField(node, apikey)
     return nil
 end
 
+local function readApiValue(node, apiName, apikey)
+    local apiEntry = node and node.state and node.state.apis and node.state.apis[apiName] or nil
+    local api = apiEntry and apiEntry.api or nil
+
+    if api and api.readValue then
+        return api.readValue(apikey)
+    end
+
+    return nil
+end
+
 local function setFieldEnabled(node, apikey, enabled)
     local field = findField(node, apikey)
     local control = field and field.control or nil
@@ -45,13 +56,15 @@ local function setFieldEnabled(node, apikey, enabled)
     end
 end
 
-local function wakeup(node)
-    local featureApiEntry = node and node.state and node.state.apis and node.state.apis.FEATURE_CONFIG or nil
-    local featureApi = featureApiEntry and featureApiEntry.api or nil
-    local enabledFeatures = tonumber(featureApi and featureApi.readValue and featureApi.readValue("enabledFeatures") or nil) or 0
-    local supported = tonumber(findField(node, "blackbox_supported") and findField(node, "blackbox_supported").value) or 0
-    local device = tonumber(findField(node, "device") and findField(node, "device").value) or 0
-    local mode = tonumber(findField(node, "mode") and findField(node, "mode").value) or 0
+local function syncControlState(node)
+    if not (node and node.state and node.state.loaded == true and node.state.loading ~= true) then
+        return
+    end
+
+    local enabledFeatures = tonumber(readApiValue(node, "FEATURE_CONFIG", "enabledFeatures")) or 0
+    local supported = tonumber(readApiValue(node, "BLACKBOX_CONFIG", "blackbox_supported")) or 0
+    local device = tonumber(readApiValue(node, "BLACKBOX_CONFIG", "device")) or 0
+    local mode = tonumber(readApiValue(node, "BLACKBOX_CONFIG", "mode")) or 0
     local editable = supported == 1 and device ~= 0 and mode ~= 0
     local buildCount = node and node.app and node.app.formBuildCount or 0
     local signature = table.concat({
@@ -93,7 +106,12 @@ end
 
 return MspPage.create({
     title = "@i18n(app.modules.blackbox.menu_logging)@",
-    buildFormWhileLoading = true,
+    loaderOnEnter = {
+        watchdogTimeout = 12.0
+    },
+    loaderOnSave = {
+        watchdogTimeout = 16.0
+    },
     eepromWrite = true,
     keepApisLoaded = true,
     help = {
@@ -132,5 +150,5 @@ return MspPage.create({
             {t = "@i18n(app.modules.blackbox.log_governor)@", api = "BLACKBOX_CONFIG", apikey = "governor", type = 1, apiversiongte = {12, 0, 9}}
         }
     },
-    wakeup = wakeup
+    controlStateSync = syncControlState
 })

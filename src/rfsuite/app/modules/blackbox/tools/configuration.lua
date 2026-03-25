@@ -20,6 +20,17 @@ local function findField(node, apikey)
     return nil
 end
 
+local function readBlackboxValue(node, apikey)
+    local apiEntry = node and node.state and node.state.apis and node.state.apis.BLACKBOX_CONFIG or nil
+    local api = apiEntry and apiEntry.api or nil
+
+    if api and api.readValue then
+        return api.readValue(apikey)
+    end
+
+    return nil
+end
+
 local function setFieldEnabled(node, apikey, enabled)
     local field = findField(node, apikey)
     local control = field and field.control or nil
@@ -31,9 +42,9 @@ end
 
 local function wakeup(node)
     local buildCount = node and node.app and node.app.formBuildCount or 0
-    local supported = tonumber(findField(node, "blackbox_supported") and findField(node, "blackbox_supported").value) or 0
-    local device = tonumber(findField(node, "device") and findField(node, "device").value) or 0
-    local mode = tonumber(findField(node, "mode") and findField(node, "mode").value) or 0
+    local supported = tonumber(readBlackboxValue(node, "blackbox_supported")) or 0
+    local device = tonumber(findField(node, "device") and findField(node, "device").value) or tonumber(readBlackboxValue(node, "device")) or 0
+    local mode = tonumber(findField(node, "mode") and findField(node, "mode").value) or tonumber(readBlackboxValue(node, "mode")) or 0
     local signature = table.concat({
         tostring(buildCount),
         tostring(supported),
@@ -59,6 +70,7 @@ return MspPage.create({
     title = "@i18n(app.modules.blackbox.menu_configuration)@",
     buildFormWhileLoading = true,
     eepromWrite = true,
+    keepApisLoaded = true,
     help = {
         "@i18n(app.modules.blackbox.help_p1)@",
         "@i18n(app.modules.blackbox.help_p2)@",

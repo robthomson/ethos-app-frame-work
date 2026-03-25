@@ -31,7 +31,7 @@ function controller:_confirmAction(title, message, action)
         message = message,
         buttons = {
             {
-                label = "OK",
+                label = "@i18n(app.btn_ok)@",
                 action = function()
                     app.modalDialogDepth = math.max(0, (app.modalDialogDepth or 0) - 1)
                     app.pendingDialogAction = action
@@ -40,7 +40,7 @@ function controller:_confirmAction(title, message, action)
                 end
             },
             {
-                label = "Cancel",
+                label = "@i18n(app.btn_cancel)@",
                 action = function()
                     app.modalDialogDepth = math.max(0, (app.modalDialogDepth or 0) - 1)
                     return true
