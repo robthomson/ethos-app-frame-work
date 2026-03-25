@@ -7312,11 +7312,11 @@
           "needs_translation": false,
           "translation": "ESC Sensor"
         },
-        "function_fbus_out": {
-          "english": "FBus Out",
-          "max_length": 8,
+        "function_fbus": {
+          "english": "FBUS",
+          "max_length": 4,
           "needs_translation": false,
-          "translation": "FBus Out"
+          "translation": "FBUS"
         },
         "function_rx_serial": {
           "english": "RX Serial",
