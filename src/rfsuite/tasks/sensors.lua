@@ -418,10 +418,10 @@ function SensorsTask:wakeup()
     local appActive = self:_appActive()
 
     self:_muteSensorLostDuringStartup(now)
-    if not appActive and mspProvider and mspProvider.seedStartupPlaceholders then
+    if mspProvider and mspProvider.seedStartupPlaceholders then
         mspProvider:seedStartupPlaceholders(now)
     end
-    if not appActive and mspProvider and mspProvider.refresh then
+    if mspProvider and mspProvider.refresh then
         mspProvider:refresh(now)
     end
     if smartProvider and smartProvider.refresh then
