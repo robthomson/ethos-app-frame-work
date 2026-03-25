@@ -410,7 +410,8 @@ local function primeProfileWatchState(node)
 end
 
 local function queueReload(node, showLoader)
-    local framework = node and node.app and node.app.framework or nil
+    local app = node and node.app or nil
+    local callback = app and app.callback or nil
     local function prepareQueuedReload()
         local ok
         local err
@@ -465,13 +466,13 @@ local function queueReload(node, showLoader)
         node.app:_invalidateForm()
     end
 
-    if framework and framework.callbackInSeconds then
-        framework:callbackInSeconds(0.02, prepareQueuedReload, "timer")
+    if callback and callback.inSeconds then
+        callback:inSeconds(0.02, prepareQueuedReload, "timer")
         return true
     end
 
-    if framework and framework.callbackNow then
-        framework:callbackNow(prepareQueuedReload, "immediate")
+    if callback and callback.now then
+        callback:now(prepareQueuedReload, "immediate")
         return true
     end
 
@@ -926,6 +927,20 @@ local function refreshBuiltControls(node)
     if node.app and node.app.resumeDirtyTracking then
         node.app:resumeDirtyTracking()
     end
+end
+
+local function hasBuiltControls(node)
+    local index
+    local field
+
+    for index = 1, #(node and node.state and node.state.fields or {}) do
+        field = node.state.fields[index]
+        if field and field.control then
+            return true
+        end
+    end
+
+    return false
 end
 
 local function buildField(line, node, app, field)
@@ -1456,11 +1471,14 @@ local function buildFlexRow(line, node, app, row)
 end
 
 local function finishRead(node)
+    local reloadFull = node.state.reloadFullPending == true
+
     prepareLayout(node)
     node.state.loaded = true
     node.state.loading = false
     node.state.error = nil
     node.state.resetDirtyAfterBuild = true
+    node.state.reloadFullPending = false
     updateDynamicTitle(node)
     refreshBuiltControls(node)
     releasePageApis(node, false)
@@ -1470,7 +1488,7 @@ local function finishRead(node)
     else
         node.app.ui.clearProgressDialog(true)
     end
-    if node.app and node.app._invalidateForm then
+    if reloadFull == true and node.app and node.app._invalidateForm then
         node.app:_invalidateForm()
     end
 end
@@ -1719,6 +1737,7 @@ function MspPage.create(spec)
                 error = nil,
                 needsInitialLoad = true,
                 reloadQueued = false,
+                reloadFullPending = true,
                 resetDirtyAfterBuild = false,
                 dirtySuspended = false,
                 closed = false
@@ -1862,8 +1881,13 @@ function MspPage.create(spec)
             self.state.reloadQueued = false
             self.state.reloadPrepared = false
             self.state.loading = true
-            self.state.loaded = false
             self.state.error = nil
+            self.state.reloadFullPending = self.spec.reloadFull == true
+                or self.state.loaded ~= true
+                or hasBuiltControls(self) ~= true
+            if self.state.reloadFullPending == true then
+                self.state.loaded = false
+            end
             suspendDirtyDuringLoad(self)
 
             if shouldShowLoader == true then
@@ -1990,6 +2014,7 @@ function MspPage.create(spec)
             self.state.closed = true
             self.state.reloadQueued = false
             self.state.reloadPrepared = false
+            self.state.reloadFullPending = false
             self.state.loading = false
             self.state.saving = false
             self.state.needsInitialLoad = false

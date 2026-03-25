@@ -424,14 +424,19 @@ end
 function runtime.wakeupBackground()
     local fw = runtime.ensureFramework()
     local now = os.clock()
+    local appActive = fw:isAppActive() == true
+
     fw.session:setMultiple({
         backgroundRegistered = true,
         backgroundWakeups = fw.session:get("backgroundWakeups", 0) + 1,
         backgroundLastWakeupAt = now,
-        backgroundState = "running",
+        backgroundState = appActive and "app_active" or "running",
         backgroundHealthy = true,
         backgroundAge = 0
     })
+    if appActive then
+        return fw
+    end
     fw:wakeupTasks()
     return fw
 end
@@ -440,6 +445,7 @@ function runtime.wakeupApp()
     local fw = runtime.openApp()
     fw.session:set("appWakeups", fw.session:get("appWakeups", 0) + 1)
     runtime.backgroundStatus()
+    fw:wakeupTasks()
     fw:wakeupApp()
     return fw
 end
