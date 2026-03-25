@@ -139,6 +139,69 @@ local function isMotorizedMode(mode)
     return (tonumber(mode) or -1) >= 1
 end
 
+local function rawTrimFromControlValue(value, mode)
+    local numeric = tonumber(value) or 0
+
+    if isMotorizedMode(mode) then
+        return numeric
+    end
+
+    return round(numeric * 100 / 24)
+end
+
+local function controlTrimFromRawValue(value, mode)
+    local numeric = tonumber(value) or 0
+
+    if isMotorizedMode(mode) then
+        return numeric
+    end
+
+    return round(math.abs(numeric) * 24 / 100)
+end
+
+local function rawLimitFromControlValue(value, mode)
+    local numeric = tonumber(value) or 0
+
+    if isMotorizedMode(mode) then
+        return numeric
+    end
+
+    return round(numeric * 100 / 24)
+end
+
+local function controlLimitFromRawValue(value, mode)
+    local numeric = tonumber(value) or 0
+
+    if isMotorizedMode(mode) then
+        return math.abs(numeric)
+    end
+
+    return round(math.abs(numeric) * 24 / 100)
+end
+
+local function applyTailModeDefaults(state, previousMode, newMode)
+    local oldMode = tonumber(previousMode) or 0
+    local targetMode = tonumber(newMode) or 0
+    local rawTrim
+    local rawCw
+    local rawCcw
+
+    if isMotorizedMode(oldMode) == isMotorizedMode(targetMode) then
+        return false
+    end
+
+    rawTrim = rawTrimFromControlValue(state.tailCenterTrim, oldMode)
+    rawCw = rawLimitFromControlValue(state.yawCwLimit, oldMode)
+    rawCcw = rawLimitFromControlValue(state.yawCcwLimit, oldMode)
+
+    state.tailCenterTrim = controlTrimFromRawValue(rawTrim, targetMode)
+    state.yawCwLimit = controlLimitFromRawValue(rawCw, targetMode)
+    state.yawCcwLimit = controlLimitFromRawValue(rawCcw, targetMode)
+    state.yawCalibration = isMotorizedMode(targetMode) and 1000 or 250
+
+    return true
+end
+
 local function writeApiValues(node, apiName, values, uuidSuffix, done, failed)
     local mspTask = node.app and node.app.framework and node.app.framework.getTask and node.app.framework:getTask("msp") or nil
     local api = mspTask and mspTask.api and mspTask.api.load and mspTask.api.load(apiName) or nil
@@ -290,15 +353,9 @@ local function startLoad(node, showLoader)
         state.yawDirection = rateToDir(rate)
         state.yawCalibration = math.abs(u16ToS16(rate))
 
-        if isMotorizedMode(mode) then
-            state.tailCenterTrim = trim
-            state.yawCwLimit = math.abs(u16ToS16(minValue))
-            state.yawCcwLimit = math.abs(u16ToS16(maxValue))
-        else
-            state.tailCenterTrim = round(math.abs(u16ToS16(trim) * 24 / 100))
-            state.yawCwLimit = round(math.abs(u16ToS16(minValue) * 24 / 100))
-            state.yawCcwLimit = round(math.abs(u16ToS16(maxValue) * 24 / 100))
-        end
+        state.tailCenterTrim = controlTrimFromRawValue(trim, mode)
+        state.yawCwLimit = controlLimitFromRawValue(u16ToS16(minValue), mode)
+        state.yawCcwLimit = controlLimitFromRawValue(u16ToS16(maxValue), mode)
 
         state.loading = false
         state.loaded = true
@@ -414,9 +471,10 @@ local function performSave(node)
 
     mixerValues.tail_rotor_mode = tonumber(state.tailMode or 0) or 0
     if motorized then
-        mixerValues.tail_motor_idle = tonumber(state.tailMotorIdle or 0) or 0
+        mixerValues.tail_motor_idle = (tonumber(state.tailMotorIdle or 0) or 0) / 10
+        mixerValues.tail_center_trim = (tonumber(state.tailCenterTrim or 0) or 0) / 10
     else
-        mixerValues.tail_center_trim = s16ToU16(round((tonumber(state.tailCenterTrim or 0) or 0) * 100 / 24))
+        mixerValues.tail_center_trim = (rawTrimFromControlValue(state.tailCenterTrim, state.tailMode) or 0) / 10
     end
 
     yawValues.rate_stabilized_yaw = s16ToU16((math.abs(tonumber(state.yawCalibration or 0) or 0)) * ((tonumber(state.yawDirection) == 0) and -1 or 1))
@@ -530,6 +588,10 @@ function Page:open(ctx)
             function(newValue)
                 newValue = tonumber(newValue) or 0
                 if newValue ~= self.state.tailMode then
+                    if applyTailModeDefaults(self.state, self.state.renderTailMode, newValue) then
+                        self.state.renderTailMode = newValue
+                        self.app:_invalidateForm()
+                    end
                     self.state.tailMode = newValue
                     markDirty()
                 end
