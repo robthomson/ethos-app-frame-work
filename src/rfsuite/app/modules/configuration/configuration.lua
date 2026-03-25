@@ -472,9 +472,7 @@ local function performSave(node)
     if featureApi.setValue then
         featuresChanged = (tonumber(state.currentFeatures) or 0) ~= (tonumber(state.originalFeatures) or 0)
         if featuresChanged == true then
-            featureApi.setValue("enabledFeatures->gps", bitIsSet(state.currentFeatures, FEATURE_BIT_GPS) and 1 or 0)
-            featureApi.setValue("enabledFeatures->led_strip", bitIsSet(state.currentFeatures, FEATURE_BIT_LED_STRIP) and 1 or 0)
-            featureApi.setValue("enabledFeatures->cms", bitIsSet(state.currentFeatures, FEATURE_BIT_CMS) and 1 or 0)
+            featureApi.setValue("enabledFeatures", tonumber(state.currentFeatures) or 0)
         end
     end
 

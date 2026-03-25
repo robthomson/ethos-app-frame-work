@@ -12,13 +12,13 @@ local factory = context.factory
 local API_NAME = "REBOOT"
 
 -- LuaFormatter off
-local MSP_API_STRUCTURE_WRITE = {
-    {field = "rebootMode", type = "U8", apiVersion = {12, 0, 6}, simResponse = {0}}
-}
+local MSP_API_STRUCTURE_WRITE = {}
 -- LuaFormatter on
 
-local function buildWritePayload(payloadData, _, _, state)
-    return core.buildWritePayload(API_NAME, payloadData, MSP_API_STRUCTURE_WRITE, state.rebuildOnWrite == true)
+local function buildWritePayload()
+    -- Match the legacy suite and FC behaviour: reboot is issued as a bare
+    -- command with no payload, even though some protocol notes mention a mode.
+    return {}
 end
 
 local function validateWrite()
