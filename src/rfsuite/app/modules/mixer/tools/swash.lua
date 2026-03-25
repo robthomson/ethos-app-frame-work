@@ -252,6 +252,8 @@ local function startLoad(node, showLoader)
             title = node.title or "Swash",
             message = "Loading mixer settings.",
             closeWhenIdle = false,
+            watchdogTimeout = 10.0,
+            transferInfo = true,
             focusMenuOnClose = true,
             modal = true
         })
@@ -540,6 +542,8 @@ local function performSave(node)
         title = node.title or "Swash",
         message = "Saving swash settings.",
         closeWhenIdle = false,
+        watchdogTimeout = 12.0,
+        transferInfo = true,
         modal = true
     })
 
