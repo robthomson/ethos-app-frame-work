@@ -63,7 +63,23 @@ Only use `reloadFull` when structure really changes, for example:
 - field layout changes with mode/profile
 - controls do not exist yet
 
-### 4. Pause MSP polling while admin is active, not sensor publishing
+### 4. If layout is stable, build controls before data arrives
+
+For pages whose structure does not depend on loaded MSP values, prefer:
+
+- build the full form immediately
+- keep controls blank until real values arrive
+- keep controls disabled until the page load completes
+- patch values into the existing controls after the read finishes
+
+Do not:
+
+- seed fake or placeholder numeric values just to make the page look populated
+- block form construction behind a simple MSP read when the layout is already known
+
+In shared MSP pages, this is the preferred pattern for "fixed layout, delayed data" pages because it gives a faster UI without inventing data.
+
+### 5. Pause MSP polling while admin is active, not sensor publishing
 
 When the admin/app UI is active:
 
@@ -72,13 +88,13 @@ When the admin/app UI is active:
 
 This prevents background MSP traffic from competing with foreground page reads while still keeping sensor consumers fed with the latest cached values.
 
-### 5. Background work and app work have separate budgets
+### 6. Background work and app work have separate budgets
 
 Treat app wakeup and background wakeup as separate CPU-risk surfaces.
 
 Even if each loop is "acceptable" on its own, both running hot can still create radio-only instability. If app UI is active, be careful not to duplicate work across both paths.
 
-### 6. Handle bitmap subfields in shared plumbing
+### 7. Handle bitmap subfields in shared plumbing
 
 If an API exposes bitmap children such as `parent->bit`, support that in shared MSP plumbing rather than in page files.
 
@@ -90,7 +106,7 @@ The correct behavior is:
 
 Do not paper over missing bitmap metadata in a page with local hardcoded dropdown tables unless it is a temporary emergency workaround.
 
-### 7. Repeated wakeup mutation is dangerous
+### 8. Repeated wakeup mutation is dangerous
 
 Page helpers that walk fields and enable/disable controls on every wakeup can be enough to trip the watchdog on radio.
 
@@ -100,7 +116,7 @@ Prefer:
 - reapply UI state only when a small signature changes
 - examples: mode, profile, voltage source, form build count
 
-### 8. Loader and error paths must be lightweight
+### 9. Loader and error paths must be lightweight
 
 Progress dialogs and error rendering should not depend on the heavy success path finishing perfectly.
 
@@ -119,12 +135,13 @@ Before merging a new page or port:
 1. Does first load do only the minimum needed work?
 2. Are deferred page tasks using `app.callback` instead of the framework callback queue?
 3. Does reload update values in place unless `reloadFull` is truly required?
-4. Are background MSP reads paused while the app is active?
-5. Are cached sensor values still republished while polling is paused?
-6. Are any bitmap child fields handled centrally instead of in the page?
-7. Does any wakeup helper mutate controls every frame? If yes, can it become signature-driven?
-8. Can error text be fully seen on-device?
-9. Has the page been tested from a fresh app start, not just after reopening?
+4. If the layout is stable, does the page build controls immediately and wait for real data instead of showing fake defaults?
+5. Are background MSP reads paused while the app is active?
+6. Are cached sensor values still republished while polling is paused?
+7. Are any bitmap child fields handled centrally instead of in the page?
+8. Does any wakeup helper mutate controls every frame? If yes, can it become signature-driven?
+9. Can error text be fully seen on-device?
+10. Has the page been tested from a fresh app start, not just after reopening?
 
 ## Symptoms And Likely Causes
 
@@ -151,6 +168,8 @@ Often means background MSP sensor polling is competing with the page's own foreg
 ## Practical Guidance For Future Ports
 
 - Start with the lightest possible loading path.
+- If the page layout is fixed, prebuild the controls and patch values in after load.
+- Blank disabled controls are better than fake defaults.
 - Add page-specific logic only after the base page is stable.
 - If a page needs custom wakeup behavior, gate it behind "loaded and controls exist".
 - If a field type feels special-case, first ask whether the API/factory layer should own it.
