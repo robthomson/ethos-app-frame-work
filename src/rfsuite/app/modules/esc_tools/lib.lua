@@ -62,6 +62,56 @@ function escTools.statusPos(app)
     }
 end
 
+function escTools.trimText(value)
+    return (tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+function escTools.formatDetails(details)
+    local parts = {}
+    local model = escTools.trimText(details and details.model or "")
+    local version = escTools.trimText(details and details.version or "")
+    local firmware = escTools.trimText(details and details.firmware or "")
+
+    if model ~= "" then
+        parts[#parts + 1] = model
+    end
+    if version ~= "" then
+        parts[#parts + 1] = version
+    end
+    if firmware ~= "" then
+        parts[#parts + 1] = firmware
+    end
+
+    return table.concat(parts, " ")
+end
+
+function escTools.decorateHeaderLine(node, text)
+    local originalBuildForm
+
+    if type(node) ~= "table" or type(node.buildForm) ~= "function" then
+        return node
+    end
+
+    originalBuildForm = node.buildForm
+    node.buildForm = function(self, app)
+        local headerText = escTools.trimText(text)
+
+        if headerText ~= "" then
+            local line = form.addLine("")
+            form.addStaticText(line, {
+                x = 0,
+                y = app.radio.linePaddingTop or 0,
+                w = app:_windowSize(),
+                h = app.radio.navbuttonHeight or 30
+            }, headerText)
+        end
+
+        return originalBuildForm(self, app)
+    end
+
+    return node
+end
+
 function escTools.gridLayout(app)
     local prefs = app and app.framework and app.framework.preferences and app.framework.preferences:section("general", {}) or {}
     local iconSize = tonumber(prefs.iconsize)

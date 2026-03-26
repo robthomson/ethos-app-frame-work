@@ -18,11 +18,21 @@ local MODEL_NAMES = {
 }
 
 function omp.details(parsed)
-    local modelId = tonumber(parsed and parsed.esc_model)
-    local version = tonumber(parsed and parsed.esc_version)
+    local primaryModelId = tonumber(parsed and parsed.esc_version)
+    local primaryVersion = tonumber(parsed and parsed.esc_model)
+    local fallbackModelId = tonumber(parsed and parsed.esc_model)
+    local fallbackVersion = tonumber(parsed and parsed.esc_version)
+    local modelId = primaryModelId
+    local version = primaryVersion
     local modelName = MODEL_NAMES[modelId]
     local major
     local minor
+
+    if modelName == nil and MODEL_NAMES[fallbackModelId] ~= nil then
+        modelId = fallbackModelId
+        version = fallbackVersion
+        modelName = MODEL_NAMES[modelId]
+    end
 
     if version == nil then
         version = 0

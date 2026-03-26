@@ -183,11 +183,7 @@ function Page:open(ctx)
         detail = state.details
         if detail ~= nil then
             line = form.addLine("")
-            form.addStaticText(line, escTools.statusPos(app), table.concat({
-                tostring(detail.model or ""),
-                tostring(detail.version or ""),
-                tostring(detail.firmware or "")
-            }, " / "))
+            form.addStaticText(line, escTools.statusPos(app), escTools.formatDetails(detail))
         end
 
         if state.loaded ~= true then

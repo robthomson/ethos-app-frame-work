@@ -41,6 +41,7 @@ local Page = {}
 
 function Page:open(ctx)
     local activeFields = escTools.getSessionValue(ctx.app, SESSION_ACTIVE_FIELDS, nil)
+    local details = escTools.getSessionValue(ctx.app, "esc_tools_omp_details", nil)
     local page = MspPage.create({
         title = "@i18n(app.modules.esc_tools.mfg.omp.governor)@",
         subtitle = ctx.item.subtitle or "@i18n(app.modules.esc_tools.mfg.omp.name)@",
@@ -58,8 +59,8 @@ function Page:open(ctx)
             fields = copyVisibleFields(activeFields)
         }
     })
-
-    return page:open(ctx)
+    local node = page:open(ctx)
+    return escTools.decorateHeaderLine(node, escTools.formatDetails(details))
 end
 
 return Page
