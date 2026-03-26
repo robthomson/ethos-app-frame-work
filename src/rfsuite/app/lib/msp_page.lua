@@ -183,11 +183,11 @@ local function fieldDefaultValue(field)
     return math.ceil(value - 0.5)
 end
 
-local function setterValue(field, controlValue)
+local function payloadValue(field, controlValue)
     local value = tonumber(controlValue)
 
     if value == nil then
-        return nil
+        return controlValue
     end
 
     if field.offset then
@@ -198,7 +198,7 @@ local function setterValue(field, controlValue)
         value = value / field.mult
     end
 
-    return value
+    return value / decimalInc(field.decimals)
 end
 
 local function lineLabelSize(node, labelId)
@@ -897,7 +897,7 @@ local function buildNumberField(line, pos, field)
             return field.value
         end,
         function(newValue)
-            field.value = setterValue(field, newValue)
+            field.value = newValue
         end)
 end
 
@@ -2017,7 +2017,11 @@ function MspPage.create(spec)
                 apiName = field.api or self.state.defaultApiName
                 apiEntry = apiName and self.state.apis[apiName] or nil
                 if apiEntry and apiEntry.api and type(field.apikey) == "string" and field.apikey ~= "" then
-                    apiEntry.api.setValue(field.apikey, field.value)
+                    if field.type == FIELD_TYPE_CHOICE or type(field.table) == "table" then
+                        apiEntry.api.setValue(field.apikey, field.value)
+                    else
+                        apiEntry.api.setValue(field.apikey, payloadValue(field, field.value))
+                    end
                 end
             end
 
