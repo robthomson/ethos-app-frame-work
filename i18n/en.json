@@ -1415,6 +1415,12 @@
         "needs_translation": false,
         "translation": "Governor activates above this %. Below this the input throttle is passed to the ESC."
       },
+      "gov_rpm_filter": {
+        "english": "Minimum frequency for the RPM filter.",
+        "max_length": 37,
+        "needs_translation": false,
+        "translation": "Minimum frequency for the RPM filter."
+      },
       "gov_recovery_time": {
         "english": "Time constant for recovery spoolup, in seconds, measuring the time from zero to full headspeed.",
         "max_length": 95,
@@ -6317,6 +6323,12 @@
           "max_length": 20,
           "needs_translation": false,
           "translation": "Autorotation Timeout"
+        },
+        "gov_rpm_filter": {
+          "english": "RPM Filter Cutoff",
+          "max_length": 17,
+          "needs_translation": false,
+          "translation": "RPM Filter Cutoff"
         },
         "gov_d_filter": {
           "english": "D-Term Cutoff",

@@ -10,6 +10,7 @@ return {
         {id = "ports", title = "Ports", subtitle = "UART and feature ports", loaderSpeed = 0.08, kind = "page", path = "ports/ports.lua", image = "app/modules/ports/ports.png"},
         {id = "mixer", title = "Mixer", subtitle = "Mixer and layout", loaderSpeed = 0.08, kind = "menu", source = "app/menu/menus/mixer.lua", image = "app/modules/mixer/mixer.png"},
         {id = "controls", title = "@i18n(app.menu_section_controls)@", subtitle = "Modes, failsafe and logging", loaderSpeed = 0.08, kind = "menu", source = "app/menu/menus/safety_menu.lua", image = "app/modules/failsafe/failsafe.png"},
+        {id = "governor", title = "@i18n(app.modules.governor.name)@", subtitle = "Global governor configuration", loaderSpeed = 0.08, kind = "menu", source = "app/menu/menus/governor.lua", image = "app/modules/governor/governor.png"},
         {id = "power", title = "@i18n(app.modules.power.name)@", subtitle = "Battery and power setup", loaderSpeed = 0.08, kind = "menu", source = "app/menu/menus/power.lua", image = "app/modules/power/power.png"}
     }
 }
