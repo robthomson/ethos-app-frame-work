@@ -83,9 +83,12 @@ framework._renderCallbackWakeupOptions = {
 framework._taskSchedulerOptions = {
     maxCriticalLoopMs = 4,
     maxLoopMs = 8,
-    maxNormalTasksPerWakeup = 3
+    maxNormalTasksPerWakeup = 3,
+    mspBusyBoostEnabled = true,
+    mspBusyMaxNormalTasksPerWakeup = 0
 }
 framework._taskRoundRobinCursor = 1
+framework._appBusyUiTick = 0
 
 function framework:_defaultPreferences()
     return {
@@ -220,9 +223,12 @@ function framework:init(config)
     self._taskSchedulerOptions = {
         maxCriticalLoopMs = ((self.config.taskScheduler or {}).maxCriticalLoopMs) or 4,
         maxLoopMs = ((self.config.taskScheduler or {}).maxLoopMs) or 8,
-        maxNormalTasksPerWakeup = ((self.config.taskScheduler or {}).maxNormalTasksPerWakeup) or 3
+        maxNormalTasksPerWakeup = ((self.config.taskScheduler or {}).maxNormalTasksPerWakeup) or 3,
+        mspBusyBoostEnabled = ((self.config.taskScheduler or {}).mspBusyBoostEnabled) ~= false,
+        mspBusyMaxNormalTasksPerWakeup = tonumber((self.config.taskScheduler or {}).mspBusyMaxNormalTasksPerWakeup) or 0
     }
     self._taskRoundRobinCursor = 1
+    self._appBusyUiTick = 0
     
     -- Initialize session state
     self.session:set("initialized", true)
@@ -630,6 +636,11 @@ function framework:_wakeupTasks()
 
     local now = os.clock()
     local scheduler = self._taskSchedulerOptions or {}
+    local session = self.session
+    local mspBusyBoost = scheduler.mspBusyBoostEnabled ~= false
+        and session
+        and session.get
+        and session:get("mspBusy", false) == true
     local criticalDeadline =
         (tonumber(scheduler.maxCriticalLoopMs) or 0) > 0 and (now + ((tonumber(scheduler.maxCriticalLoopMs) or 0) / 1000.0))
         or nil
@@ -641,6 +652,13 @@ function framework:_wakeupTasks()
     local index
     local taskInfo
     local meta
+
+    if mspBusyBoost == true then
+        maxNormalTasks = tonumber(scheduler.mspBusyMaxNormalTasksPerWakeup)
+        if maxNormalTasks == nil then
+            maxNormalTasks = 0
+        end
+    end
 
     for _, taskInfo in ipairs(self._taskOrder) do
         if criticalDeadline and os.clock() >= criticalDeadline then
@@ -686,6 +704,27 @@ end
 
 function framework:_wakeupApp()
     if not self._initialized then
+        return
+    end
+
+    local session = self.session
+    local appConfig = self.config and self.config.app or {}
+    local runNum = tonumber(appConfig.mspBusyUiRunNum) or 2
+    local runDen = tonumber(appConfig.mspBusyUiRunDen) or 3
+    local shouldRun = true
+
+    if runNum < 0 then runNum = 0 end
+    if runDen < 1 then runDen = 1 end
+    if runNum > runDen then runNum = runDen end
+
+    if session and session.get and session:get("mspBusy", false) == true then
+        self._appBusyUiTick = ((self._appBusyUiTick or 0) % runDen) + 1
+        shouldRun = self._appBusyUiTick <= runNum
+    else
+        self._appBusyUiTick = 0
+    end
+
+    if shouldRun ~= true then
         return
     end
 

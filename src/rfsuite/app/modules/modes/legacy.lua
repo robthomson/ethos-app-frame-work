@@ -216,6 +216,17 @@ local function syncNavButtonsForState()
     page.navButtons = {menu = true, save = true, reload = true, tool = false, help = true}
 end
 
+local function markDirty(needsRender)
+    state.dirty = true
+    if needsRender == true then
+        state.needsRender = true
+    end
+    updateSaveButtonState()
+    if app and app._syncSaveButtonState then
+        app:_syncSaveButtonState()
+    end
+end
+
 -- Forward declaration: used by helpers defined before the function body.
 local buildModesFromRaw
 
@@ -234,9 +245,8 @@ local function removeRangeSlot(slot)
     }
     state.autoDetectSlots[slot] = nil
 
-    state.dirty = true
+    markDirty(true)
     buildModesFromRaw()
-    state.needsRender = true
 end
 
 local function addModeRangeLine(rangeIndex, modeRange)
@@ -312,8 +322,7 @@ local function addModeRangeLine(rangeIndex, modeRange)
                     action = function()
                         rawRange.range.start = targetStart
                         rawRange.range["end"] = targetEnd
-                        state.dirty = true
-                        state.needsRender = true
+                        markDirty(true)
                         return true
                     end
                 },
@@ -361,7 +370,7 @@ local function addModeRangeLine(rangeIndex, modeRange)
                 state.autoDetectSlots[slot] = nil
                 rawRange.auxChannelIndex = clamp((value or 2) - 2, 0, AUX_CHANNEL_COUNT_FALLBACK - 1)
             end
-            state.dirty = true
+            markDirty(false)
         end
     )
 
@@ -372,7 +381,7 @@ local function addModeRangeLine(rangeIndex, modeRange)
         function() return clamp(rawExtra.modeLogic or 0, 0, #MODE_LOGIC_OPTIONS - 1) end,
         function(value)
             rawExtra.modeLogic = clamp(value or 0, 0, 1)
-            state.dirty = true
+            markDirty(false)
         end
     )
 
@@ -386,7 +395,7 @@ local function addModeRangeLine(rangeIndex, modeRange)
             local adjusted = clamp(math.floor(value / RANGE_STEP) * RANGE_STEP, RANGE_MIN, RANGE_MAX)
             rawRange.range.start = adjusted
             if rawRange.range["end"] < adjusted then rawRange.range["end"] = adjusted end
-            state.dirty = true
+            markDirty(false)
         end
     )
 
@@ -400,7 +409,7 @@ local function addModeRangeLine(rangeIndex, modeRange)
             local adjusted = clamp(math.floor(value / RANGE_STEP) * RANGE_STEP, RANGE_MIN, RANGE_MAX)
             rawRange.range["end"] = adjusted
             if rawRange.range.start > adjusted then rawRange.range.start = adjusted end
-            state.dirty = true
+            markDirty(false)
         end
     )
 
@@ -522,7 +531,7 @@ local function readModeRanges()
     if API.setTimeout then API.setTimeout(API_READ_TIMEOUT) end
 
     API.setCompleteHandler(function()
-        updateLoader("Loading mode range extras", {watchdogTimeout = 10.0, transferInfo = true})
+        updateLoader("Loading mode range extras", {watchdogTimeout = 30.0, transferInfo = true})
         state.modeRanges = API.readValue("mode_ranges") or {}
         readModeRangesExtra()
     end)
@@ -546,7 +555,7 @@ local function readBoxNames()
 
     API.setCompleteHandler(function()
         state.boxNamesRetryCount = 0
-        updateLoader("Loading mode ranges", {watchdogTimeout = 10.0, transferInfo = true})
+        updateLoader("Loading mode ranges", {watchdogTimeout = 30.0, transferInfo = true})
         state.modeNames = API.readValue("box_names") or {}
         readModeRanges()
     end)
@@ -554,7 +563,7 @@ local function readBoxNames()
     API.setErrorHandler(function()
         if state.boxNamesRetryCount < BOXNAMES_RETRY_LIMIT then
             state.boxNamesRetryCount = state.boxNamesRetryCount + 1
-            updateLoader("Retrying mode names", {watchdogTimeout = 10.0, transferInfo = true})
+            updateLoader("Retrying mode names", {watchdogTimeout = 30.0, transferInfo = true})
             readBoxNames()
             return
         end
@@ -564,7 +573,7 @@ local function readBoxNames()
     if API.read() ~= true then
         if state.boxNamesRetryCount < BOXNAMES_RETRY_LIMIT then
             state.boxNamesRetryCount = state.boxNamesRetryCount + 1
-            updateLoader("Retrying mode names", {watchdogTimeout = 10.0, transferInfo = true})
+            updateLoader("Retrying mode names", {watchdogTimeout = 30.0, transferInfo = true})
             readBoxNames()
             return
         end
@@ -581,7 +590,7 @@ local function readBoxIds()
     if API.setTimeout then API.setTimeout(API_READ_TIMEOUT) end
 
     API.setCompleteHandler(function()
-        updateLoader("Loading mode names", {watchdogTimeout = 10.0, transferInfo = true})
+        updateLoader("Loading mode names", {watchdogTimeout = 30.0, transferInfo = true})
         state.modeIds = API.readValue("box_ids") or {}
         readBoxNames()
     end)
@@ -612,7 +621,7 @@ local function startLoad()
             title = "Modes",
             message = "Loading mode configuration",
             speed = speed,
-            watchdogTimeout = 20.0,
+            watchdogTimeout = 30.0,
             transferInfo = true,
             closeWhenIdle = true,
             modal = true
@@ -673,9 +682,8 @@ local function addRangeToSelectedMode()
         linkedTo = 0
     }
 
-    state.dirty = true
+    markDirty(true)
     buildModesFromRaw()
-    state.needsRender = true
 end
 
 local function render()
@@ -801,8 +809,7 @@ local function updateLiveRangeFields()
                     if bestIdx ~= nil and bestDelta >= 120 then
                         range.auxChannelIndex = bestIdx
                         state.autoDetectSlots[slot] = nil
-                        state.dirty = true
-                        state.needsRender = true
+                        markDirty(true)
                         field:value("AUX " .. tostring(bestIdx + 1) .. ": " .. tostring(bestUs or 0) .. "us")
                     else
                         field:value("AUTO...")
@@ -871,7 +878,7 @@ local function saveAllRanges()
             kind = "save",
             title = "Modes",
             message = "Saving mode configuration",
-            watchdogTimeout = 16.0,
+            watchdogTimeout = 24.0,
             transferInfo = true,
             closeWhenIdle = true,
             modal = true

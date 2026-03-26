@@ -68,6 +68,9 @@ function Page:open(ctx)
         if type(legacy.wakeup) == "function" then
             legacy.wakeup()
         end
+        if self.app and self.app._syncSaveButtonState then
+            self.app:_syncSaveButtonState()
+        end
     end
 
     function node:save()

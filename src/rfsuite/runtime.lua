@@ -96,7 +96,9 @@ runtime.config = {
     taskScheduler = {
         maxCriticalLoopMs = 4,
         maxLoopMs = 8,
-        maxNormalTasksPerWakeup = 3
+        maxNormalTasksPerWakeup = 3,
+        mspBusyBoostEnabled = true,
+        mspBusyMaxNormalTasksPerWakeup = 0
     },
     mspProtocolVersion = 1,
     bgTaskName = "Rotorflight [Background]",
@@ -117,7 +119,9 @@ runtime.config = {
         missingAfter = 3.0
     },
     app = {
-        idleCleanupDelay = 0.20
+        idleCleanupDelay = 0.20,
+        mspBusyUiRunNum = 2,
+        mspBusyUiRunDen = 3
     }
 }
 
