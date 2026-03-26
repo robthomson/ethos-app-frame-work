@@ -9014,11 +9014,35 @@
           "needs_translation": false,
           "translation": "Minimum"
         },
+        "loading_bus": {
+          "english": "Loading BUS servo values.",
+          "max_length": 24,
+          "needs_translation": false,
+          "translation": "Loading BUS servo values."
+        },
+        "loading_list": {
+          "english": "Loading servo layout.",
+          "max_length": 21,
+          "needs_translation": false,
+          "translation": "Loading servo layout."
+        },
+        "loading_pwm": {
+          "english": "Loading PWM servo values.",
+          "max_length": 24,
+          "needs_translation": false,
+          "translation": "Loading PWM servo values."
+        },
         "name": {
           "english": "Servos",
           "max_length": 6,
           "needs_translation": false,
           "translation": "Servos"
+        },
+        "no_servos": {
+          "english": "NO SERVOS FOUND",
+          "max_length": 15,
+          "needs_translation": false,
+          "translation": "NO SERVOS FOUND"
         },
         "pwm": {
           "english": "PWM Output",
@@ -9061,6 +9085,18 @@
           "max_length": 6,
           "needs_translation": false,
           "translation": "SERVO "
+        },
+        "saving_bus": {
+          "english": "Saving BUS servo values.",
+          "max_length": 23,
+          "needs_translation": false,
+          "translation": "Saving BUS servo values."
+        },
+        "saving_pwm": {
+          "english": "Saving PWM servo values.",
+          "max_length": 23,
+          "needs_translation": false,
+          "translation": "Saving PWM servo values."
         },
         "speed": {
           "english": "Speed",
