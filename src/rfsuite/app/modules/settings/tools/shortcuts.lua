@@ -86,7 +86,7 @@ function Page:open(ctx)
     local lastSelected = ctx.framework.preferences:section("menulastselected", {})
     local state = {
         registry = registry,
-        config = copyMap(selectedPrefs),
+        config = SHORTCUTS.limitSelectionMap(selectedPrefs, maxSelected, registry),
         mixedIn = prefBool(general.shortcuts_mixed_in, true),
         groupIndex = tonumber(lastSelected[GROUP_PREF_KEY]) or 1
     }
@@ -176,7 +176,7 @@ function Page:open(ctx)
             modal = true
         })
 
-        self.state.config = copyMap(freshShortcuts)
+        self.state.config = SHORTCUTS.limitSelectionMap(freshShortcuts, maxSelected, self.state.registry)
         self.state.mixedIn = prefBool(freshGeneral.shortcuts_mixed_in, true)
         self.state.groupIndex = tonumber(freshLastSelected[GROUP_PREF_KEY]) or 1
         app:_invalidateForm()

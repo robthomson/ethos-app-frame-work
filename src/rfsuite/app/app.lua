@@ -332,6 +332,25 @@ local function boolString(value)
     return value == true and "Yes" or "No"
 end
 
+local function hasTruthyShortcutPrefs(shortcutsSection)
+    local key
+    local value
+
+    if type(shortcutsSection) ~= "table" then
+        return false
+    end
+
+    for key, value in pairs(shortcutsSection) do
+        if type(key) == "string" and key ~= "" then
+            if value == true or value == "true" or value == 1 or value == "1" then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
 function App:init(framework)
     local radioConfig, radioErr
 
@@ -372,6 +391,8 @@ function App:init(framework)
     self.pendingDialogActionLocked = false
     self.modalDialogDepth = 0
     self.formBuildCount = 0
+    self.pendingRootShortcutRefresh = false
+    self.initialRootWarmRefreshPending = true
     self.mspTask = nil
     self.loaderSpeed = {
         VSLOW = 0.5,
@@ -1726,6 +1747,9 @@ function App:_loadRootNode()
     local shortcuts
     local visibility
     local shortcutItems
+    local shortcutOk
+    local shortcutErr
+    local shortcutPrefs
     local merged
     local filtered
     local i
@@ -1748,7 +1772,11 @@ function App:_loadRootNode()
 
     shortcuts = loadShortcutsModule()
     if shortcuts and type(shortcuts.buildRootItems) == "function" then
-        shortcutItems = select(2, pcall(shortcuts.buildRootItems, self.framework))
+        shortcutOk, shortcutItems = pcall(shortcuts.buildRootItems, self.framework)
+        if not shortcutOk then
+            shortcutErr = shortcutItems
+            shortcutItems = nil
+        end
         if type(shortcutItems) == "table" and #shortcutItems > 0 then
             merged = {}
             insertAt = 0
@@ -1769,6 +1797,41 @@ function App:_loadRootNode()
             end
 
             node.items = merged
+            self.pendingRootShortcutRefresh = false
+        elseif self.pendingRootShortcutRefresh ~= true then
+            shortcutPrefs = self.framework and self.framework.preferences and self.framework.preferences:section("shortcuts", {}) or nil
+            if hasTruthyShortcutPrefs(shortcutPrefs) == true then
+                self.pendingRootShortcutRefresh = true
+                if self.framework and self.framework.log and self.framework.log.warn and shortcutErr ~= nil then
+                    self.framework.log:warn("Initial shortcut build failed; retrying on app callback: %s", tostring(shortcutErr))
+                end
+                self.callback:now(function()
+                    local refreshedNode
+                    local refreshedItems
+                    local refreshedOk
+
+                    self.pendingRootShortcutRefresh = false
+                    if self.currentNodeSource ~= MENU_ROOT_PATH then
+                        return
+                    end
+
+                    refreshedNode = loadLuaTable(MENU_ROOT_PATH)
+                    if type(refreshedNode) ~= "table" then
+                        return
+                    end
+
+                    if shortcuts and type(shortcuts.resetRegistry) == "function" then
+                        shortcuts.resetRegistry()
+                    end
+
+                    if shortcuts and type(shortcuts.buildRootItems) == "function" then
+                        refreshedOk, refreshedItems = pcall(shortcuts.buildRootItems, self.framework)
+                        if refreshedOk and type(refreshedItems) == "table" and #refreshedItems > 0 then
+                            self:_reloadCurrentMenuNode()
+                        end
+                    end
+                end, "immediate")
+            end
         end
     end
 
@@ -2155,6 +2218,11 @@ function App:wakeup()
         self.pageHost:ensureCurrentNode()
     end
 
+    if self.initialRootWarmRefreshPending == true and self.currentNodeSource == MENU_ROOT_PATH then
+        self.initialRootWarmRefreshPending = false
+        self:_reloadCurrentMenuNode()
+    end
+
     if self:_nodeHasMenuItems(self.currentNode) == true then
         self:_refreshMenuAccess()
     end
@@ -2206,6 +2274,7 @@ function App:onActivate()
     self.pendingDialogActionReady = false
     self.pendingDialogActionLocked = false
     self.modalDialogDepth = 0
+    self.initialRootWarmRefreshPending = true
     self.lifecycleController:activate()
 end
 
@@ -2218,6 +2287,7 @@ function App:onDeactivate()
     self.pendingDialogActionReady = false
     self.pendingDialogActionLocked = false
     self.modalDialogDepth = 0
+    self.initialRootWarmRefreshPending = false
     self.lifecycleController:deactivate()
 end
 
@@ -2230,6 +2300,7 @@ function App:close()
     self.pendingDialogActionReady = false
     self.pendingDialogActionLocked = false
     self.modalDialogDepth = 0
+    self.initialRootWarmRefreshPending = false
     self.lifecycleController:close()
     self.callback = nil
     self.formHost = nil
