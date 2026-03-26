@@ -5,6 +5,7 @@
 
 local diagnostics = assert(loadfile("app/modules/diagnostics/lib.lua"))()
 local helpData = assert(loadfile("app/modules/servos/help.lua"))()
+local AudioLib = require("lib.audio")
 local utils = require("lib.utils")
 
 local servos = {}
@@ -570,6 +571,7 @@ local function queueOverrideAll(node, enabled)
     if ok == true then
         state.overrideEnabled = enabled == true
         setSessionValue(app, "servoOverrideEnabled", state.overrideEnabled)
+        AudioLib.playFile("app", enabled == true and "soverideen.wav" or "soveridedis.wav")
         syncSaveButton(node)
     end
 
