@@ -3,9 +3,13 @@
   GPLv3 -- https://www.gnu.org/licenses/gpl-3.0.en.html
 ]] --
 
-local rfsuite = require("rfsuite")
-local pageRuntime = assert(loadfile("app/lib/page_runtime.lua"))()
-local navHandlers = pageRuntime.createMenuHandlers({defaultSection = "hardware"})
+local utils = require("lib.utils")
+local app = nil
+local framework = nil
+local session = nil
+local preferences = nil
+local tasks = nil
+local pageNode = nil
 
 local ADJUST_TYPE_OPTIONS = {
     "@i18n(app.modules.adjustments.type_off)@",
@@ -142,6 +146,32 @@ local state = {
     showFunctionNamesInRangeSelector = false
 }
 
+local function setContext(ctx)
+    app = ctx and ctx.app or nil
+    framework = app and app.framework or nil
+    session = framework and framework.session or nil
+    preferences = framework and framework.preferences or nil
+    pageNode = ctx and ctx.node or nil
+    tasks = {
+        msp = framework and framework.getTask and framework:getTask("msp") or nil,
+        callback = app and app.callback or nil
+    }
+end
+
+local function layoutMetrics(currentApp)
+    local width
+    local height
+    local radio = currentApp and currentApp.radio or {}
+
+    if currentApp and currentApp._windowSize then
+        width, height = currentApp:_windowSize()
+    elseif lcd and lcd.getWindowSize then
+        width, height = lcd.getWindowSize()
+    end
+
+    return width or 0, height or 0, radio.navbuttonHeight or 30, radio.linePaddingTop or 0
+end
+
 local function setPendingFocus(key)
     state.pendingFocusKey = key
 end
@@ -157,7 +187,7 @@ end
 
 local function queueDirect(message, uuid)
     if message and uuid and message.uuid == nil then message.uuid = uuid end
-    return rfsuite.tasks.msp.mspQueue:add(message)
+    return tasks.msp.mspQueue:add(message)
 end
 
 local function clamp(value, minValue, maxValue)
@@ -224,7 +254,7 @@ end
 
 local function auxIndexToMember(auxIndex)
     local idx = clamp(auxIndex or 0, 0, AUX_CHANNEL_COUNT_FALLBACK - 1)
-    local rx = rfsuite.session and rfsuite.session.rx
+    local rx = session and session.rx
     local map = rx and rx.map or nil
 
     if map then
@@ -268,8 +298,8 @@ local function hasActiveAutoDetect()
 end
 
 local function functionVisible(def)
-    if def.minApi and not rfsuite.utils.apiVersionCompare(">=", def.minApi) then return false end
-    if def.maxApi and not rfsuite.utils.apiVersionCompare("<=", def.maxApi) then return false end
+    if def.minApi and not utils.apiVersionCompare(">=", def.minApi) then return false end
+    if def.maxApi and not utils.apiVersionCompare("<=", def.maxApi) then return false end
     return true
 end
 
@@ -533,18 +563,18 @@ local function getChangedSlots()
 end
 
 local function updateSaveButtonState()
-    local nav = rfsuite.app and rfsuite.app.formNavigationFields
+    local nav = app and app.formNavigationFields
     local saveField = nav and nav["save"] or nil
     if not saveField or not saveField.enable then return end
 
-    local pref = rfsuite.preferences and rfsuite.preferences.general and rfsuite.preferences.general.save_dirty_only
+    local pref = preferences and preferences.general and preferences.general.save_dirty_only
     local requireDirty = not (pref == false or pref == "false")
     local canSave = state.loaded and (not state.loading) and (not state.saving) and (not state.readFallbackLocked) and ((not requireDirty) or state.dirty)
     saveField:enable(canSave)
 end
 
 local function syncNavButtonsForState()
-    local page = rfsuite.app and rfsuite.app.Page
+    local page = pageNode
     if not page then return end
 
     if state.readFallbackLocked then
@@ -567,27 +597,27 @@ local function setLoadError(reason)
     state.loaded = false
     state.loadError = reason or "Load failed"
     state.needsRender = true
-    rfsuite.app.triggers.closeProgressLoader = true
+    app.triggers.closeProgressLoader = true
 end
 
 local function parseAdjustmentRangeRecord(buf)
     if type(buf) ~= "table" then return nil end
     buf.offset = 1
 
-    local adjFunction = rfsuite.tasks.msp.mspHelper.readU8(buf)
+    local adjFunction = tasks.msp.mspHelper.readU8(buf)
     if adjFunction == nil then return nil end
 
-    local enaChannel = rfsuite.tasks.msp.mspHelper.readU8(buf)
-    local enaStartStep = rfsuite.tasks.msp.mspHelper.readS8(buf)
-    local enaEndStep = rfsuite.tasks.msp.mspHelper.readS8(buf)
-    local adjChannel = rfsuite.tasks.msp.mspHelper.readU8(buf)
-    local adjRange1StartStep = rfsuite.tasks.msp.mspHelper.readS8(buf)
-    local adjRange1EndStep = rfsuite.tasks.msp.mspHelper.readS8(buf)
-    local adjRange2StartStep = rfsuite.tasks.msp.mspHelper.readS8(buf)
-    local adjRange2EndStep = rfsuite.tasks.msp.mspHelper.readS8(buf)
-    local adjMin = rfsuite.tasks.msp.mspHelper.readS16(buf)
-    local adjMax = rfsuite.tasks.msp.mspHelper.readS16(buf)
-    local adjStep = rfsuite.tasks.msp.mspHelper.readU8(buf)
+    local enaChannel = tasks.msp.mspHelper.readU8(buf)
+    local enaStartStep = tasks.msp.mspHelper.readS8(buf)
+    local enaEndStep = tasks.msp.mspHelper.readS8(buf)
+    local adjChannel = tasks.msp.mspHelper.readU8(buf)
+    local adjRange1StartStep = tasks.msp.mspHelper.readS8(buf)
+    local adjRange1EndStep = tasks.msp.mspHelper.readS8(buf)
+    local adjRange2StartStep = tasks.msp.mspHelper.readS8(buf)
+    local adjRange2EndStep = tasks.msp.mspHelper.readS8(buf)
+    local adjMin = tasks.msp.mspHelper.readS16(buf)
+    local adjMax = tasks.msp.mspHelper.readS16(buf)
+    local adjStep = tasks.msp.mspHelper.readU8(buf)
 
     if enaChannel == nil or enaStartStep == nil or enaEndStep == nil or adjChannel == nil or adjRange1StartStep == nil or
         adjRange1EndStep == nil or adjRange2StartStep == nil or adjRange2EndStep == nil or adjMin == nil or adjMax == nil or adjStep == nil then
@@ -674,7 +704,7 @@ local function readAdjustmentFunctions(onComplete, onError)
         return
     end
 
-    local API = rfsuite.tasks.msp.api.load("GET_ADJUSTMENT_FUNCTION_IDS")
+    local API = tasks.msp.api.load("GET_ADJUSTMENT_FUNCTION_IDS")
     if not API then
         state.supportsAdjustmentFunctions = false
         if onError then onError("GET_ADJUSTMENT_FUNCTION_IDS API unavailable") end
@@ -696,7 +726,7 @@ local function readAdjustmentFunctions(onComplete, onError)
 end
 
 local function shouldUseMspFunctionNamePrefetch()
-    return rfsuite.utils.apiVersionCompare(">=", MSP_FUNCTION_NAME_PREFETCH_MIN_API)
+    return utils.apiVersionCompare(">=", MSP_FUNCTION_NAME_PREFETCH_MIN_API)
 end
 
 local function applyAdjustmentFunctions(functions)
@@ -713,7 +743,7 @@ local function applyAdjustmentFunctions(functions)
 end
 
 local function readAdjustmentRangesBulk(onComplete, onError)
-    local API = rfsuite.tasks.msp.api.load("ADJUSTMENT_RANGES")
+    local API = tasks.msp.api.load("ADJUSTMENT_RANGES")
     if not API then
         if onError then onError("ADJUSTMENT_RANGES API unavailable") end
         return
@@ -757,10 +787,10 @@ local function readAdjustmentRanges()
             state.loadError = nil
             state.infoMessage = messageOverride or (usedDefaultFallback and "@i18n(app.modules.adjustments.info_default_slots)@" or nil)
             state.needsRender = true
-            rfsuite.app.triggers.closeProgressLoader = true
+            app.triggers.closeProgressLoader = true
         end
 
-        local callback = rfsuite.tasks and rfsuite.tasks.callback
+        local callback = tasks and tasks.callback
         if callback and callback.now then
             callback.now(finalizeLoad)
         else
@@ -783,10 +813,10 @@ local function readAdjustmentRanges()
             state.loadError = nil
             state.infoMessage = nil
             state.needsRender = true
-            rfsuite.app.triggers.closeProgressLoader = true
+            app.triggers.closeProgressLoader = true
         end
 
-        local callback = rfsuite.tasks and rfsuite.tasks.callback
+        local callback = tasks and tasks.callback
         if callback and callback.now then
             callback.now(finalizeFallback)
         else
@@ -809,7 +839,7 @@ local function readAdjustmentRanges()
         state.loadError = nil
         state.infoMessage = nil
         state.needsRender = true
-        rfsuite.app.triggers.closeProgressLoader = true
+        app.triggers.closeProgressLoader = true
     end
 
     requestSlotLoad(state.selectedRangeIndex, function()
@@ -875,7 +905,7 @@ local function startLoad()
     state.loadedSlots = {}
     state.pendingSlotLoads = {}
     state.needsRender = true
-    rfsuite.app.ui.progressDisplay(MODULE_TITLE, "@i18n(app.modules.adjustments.loading_ranges)@")
+    app.ui.progressDisplay(MODULE_TITLE, "@i18n(app.modules.adjustments.loading_ranges)@")
     readAdjustmentRanges()
 end
 
@@ -1175,13 +1205,18 @@ local function updateLiveFields()
 end
 
 local function render()
-    local app = rfsuite.app
+    local currentApp = app
 
     state.liveFields = {}
     syncNavButtonsForState()
 
     form.clear()
-    app.ui.fieldHeader(state.title)
+    if currentApp and currentApp._addHeader and pageNode then
+        pageNode.title = state.title
+        currentApp:_addHeader(pageNode)
+    elseif currentApp and currentApp.setHeaderTitle then
+        currentApp:setHeaderTitle(state.title)
+    end
 
     if state.loading then
         form.addLine("@i18n(app.modules.adjustments.loading_ranges_detail)@")
@@ -1204,9 +1239,7 @@ local function render()
         return
     end
 
-    local width = app.lcdWidth
-    local h = app.radio.navbuttonHeight
-    local y = app.radio.linePaddingTop
+    local width, _, h, y = layoutMetrics(currentApp)
     local rightPadding = 8
     local gap = 6
     local wSet = math.max(42, math.floor(width * 0.14))
@@ -1672,7 +1705,7 @@ local function saveAllRanges()
 
     state.saving = true
     state.infoMessage = nil
-    rfsuite.app.ui.progressDisplay(MODULE_TITLE, "@i18n(app.modules.adjustments.saving_changed_ranges)@")
+    app.ui.progressDisplay(MODULE_TITLE, "@i18n(app.modules.adjustments.saving_changed_ranges)@")
 
     local slotPos = 1
 
@@ -1680,7 +1713,7 @@ local function saveAllRanges()
         state.saving = false
         state.saveError = reason or "Save failed"
         state.needsRender = true
-        rfsuite.app.triggers.closeProgressLoader = true
+        app.triggers.closeProgressLoader = true
     end
 
     local function writeNext()
@@ -1692,7 +1725,7 @@ local function saveAllRanges()
                 state.saveError = nil
                 state.infoMessage = nil
                 state.needsRender = true
-                rfsuite.app.triggers.closeProgressLoader = true
+                app.triggers.closeProgressLoader = true
             end, failed)
             return
         end
@@ -1710,7 +1743,7 @@ end
 local function onSaveMenu()
     if state.loading or state.saving or not state.loaded then return end
     if state.readFallbackLocked then return end
-    local pref = rfsuite.preferences and rfsuite.preferences.general and rfsuite.preferences.general.save_dirty_only
+    local pref = preferences and preferences.general and preferences.general.save_dirty_only
     local requireDirty = not (pref == false or pref == "false")
     if requireDirty and (not state.dirty) then return end
 
@@ -1728,7 +1761,7 @@ local function onSaveMenu()
         return
     end
 
-    if rfsuite.preferences.general.save_confirm == false or rfsuite.preferences.general.save_confirm == "false" then
+    if preferences.general.save_confirm == false or preferences.general.save_confirm == "false" then
         saveAllRanges()
         return
     end
@@ -1772,10 +1805,10 @@ local function openPage(opts)
     local idx = opts.idx
     state.title = opts.title or MODULE_TITLE
 
-    rfsuite.app.lastIdx = idx
-    rfsuite.app.lastTitle = state.title
-    rfsuite.app.lastScript = opts.script
-    rfsuite.session.lastPage = opts.script
+    app.lastIdx = idx
+    app.lastTitle = state.title
+    app.lastScript = opts.script
+    session.lastPage = opts.script
 
     buildFunctionOptions(nil)
     startLoad()
@@ -1783,11 +1816,11 @@ end
 
 return {
     title = MODULE_TITLE,
+    setContext = setContext,
     openPage = openPage,
     wakeup = wakeup,
     onSaveMenu = onSaveMenu,
     onReloadMenu = onReloadMenu,
-    onNavMenu = navHandlers.onNavMenu,
     eepromWrite = false,
     reboot = false,
     navButtons = {menu = true, save = true, reload = true, tool = false, help = true},

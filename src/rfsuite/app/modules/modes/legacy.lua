@@ -3,9 +3,12 @@
   GPLv3 -- https://www.gnu.org/licenses/gpl-3.0.en.html
 ]] --
 
-local rfsuite = require("rfsuite")
-local pageRuntime = assert(loadfile("app/lib/page_runtime.lua"))()
-local navHandlers = pageRuntime.createMenuHandlers({defaultSection = "hardware"})
+local app = nil
+local framework = nil
+local session = nil
+local preferences = nil
+local tasks = nil
+local pageNode = nil
 
 local MODE_LOGIC_OPTIONS = {"OR", "AND"}
 local AUX_CHANNEL_COUNT_FALLBACK = 20
@@ -14,6 +17,8 @@ local RANGE_MAX = 2125
 local RANGE_STEP = 5
 local RANGE_SNAP_DELTA_US = 50
 local MODULE_LOADER_SPEED = 0.05
+local API_READ_TIMEOUT = 6.0
+local BOXNAMES_RETRY_LIMIT = 1
 
 local state = {
     title = "Modes",
@@ -32,12 +37,73 @@ local state = {
     needsRender = false,
     liveRangeFields = {},
     channelSources = {},
-    autoDetectSlots = {}
+    autoDetectSlots = {},
+    boxNamesRetryCount = 0
 }
+
+local function setContext(ctx)
+    app = ctx and ctx.app or nil
+    framework = app and app.framework or nil
+    session = framework and framework.session or nil
+    preferences = framework and framework.preferences or nil
+    pageNode = ctx and ctx.node or nil
+    tasks = {
+        msp = framework and framework.getTask and framework:getTask("msp") or nil,
+        callback = app and app.callback or nil
+    }
+end
+
+local function layoutMetrics(currentApp)
+    local width
+    local height
+    local radio = currentApp and currentApp.radio or {}
+
+    if currentApp and currentApp._windowSize then
+        width, height = currentApp:_windowSize()
+    elseif lcd and lcd.getWindowSize then
+        width, height = lcd.getWindowSize()
+    end
+
+    return width or 0, height or 0, radio.navbuttonHeight or 30, radio.linePaddingTop or 0
+end
 
 local function queueDirect(message, uuid)
     if message and uuid and message.uuid == nil then message.uuid = uuid end
-    return rfsuite.tasks.msp.mspQueue:add(message)
+    return tasks.msp.mspQueue:add(message)
+end
+
+local function updateLoader(message, opts)
+    local options = opts or {}
+
+    if not (app and app.ui) then
+        return
+    end
+
+    if app.ui.updateLoader then
+        options.message = message or options.message
+        app.ui.updateLoader(options)
+        return
+    end
+
+    if app.ui.updateProgressDialogMessage and message ~= nil then
+        app.ui.updateProgressDialogMessage(message)
+    end
+end
+
+local function requestLoaderClose()
+    if app and app.requestLoaderClose then
+        app:requestLoaderClose()
+        return
+    end
+
+    if app and app.ui and app.ui.requestLoaderClose then
+        app.ui.requestLoaderClose()
+        return
+    end
+
+    if app and app.ui and app.ui.clearProgressDialog then
+        app.ui.clearProgressDialog()
+    end
 end
 
 local function clamp(value, minValue, maxValue)
@@ -74,7 +140,7 @@ end
 
 local function auxIndexToMember(auxIndex)
     local idx = clamp(auxIndex or 0, 0, AUX_CHANNEL_COUNT_FALLBACK - 1)
-    local rx = rfsuite.session and rfsuite.session.rx
+    local rx = session and session.rx
     local map = rx and rx.map or nil
 
     if map then
@@ -130,13 +196,13 @@ local AUX_OPTIONS_TBL = buildChoiceTable(AUX_OPTIONS, 0)
 local MODE_LOGIC_OPTIONS_TBL = buildChoiceTable(MODE_LOGIC_OPTIONS, -1)
 
 local function canSave()
-    local pref = rfsuite.preferences and rfsuite.preferences.general and rfsuite.preferences.general.save_dirty_only
+    local pref = preferences and preferences.general and preferences.general.save_dirty_only
     local requireDirty = not (pref == false or pref == "false")
     return state.loaded and (not state.loading) and (not state.saving) and ((not requireDirty) or state.dirty)
 end
 
 local function updateSaveButtonState()
-    local nav = rfsuite.app and rfsuite.app.formNavigationFields
+    local nav = app and app.formNavigationFields
     local saveField = nav and nav["save"] or nil
     if not saveField then return end
     if saveField.enable then
@@ -145,7 +211,7 @@ local function updateSaveButtonState()
 end
 
 local function syncNavButtonsForState()
-    local page = rfsuite.app and rfsuite.app.Page
+    local page = pageNode
     if not page then return end
     page.navButtons = {menu = true, save = true, reload = true, tool = false, help = true}
 end
@@ -174,15 +240,13 @@ local function removeRangeSlot(slot)
 end
 
 local function addModeRangeLine(rangeIndex, modeRange)
-    local app = rfsuite.app
+    local currentApp = app
     local slot = modeRange.slot
     local rawRange = slot and state.modeRanges[slot] or nil
     local rawExtra = slot and state.modeRangesExtra[slot] or nil
     if not rawRange or not rawExtra or not rawRange.range then return end
 
-    local width = app.lcdWidth
-    local h = app.radio.navbuttonHeight
-    local y = app.radio.linePaddingTop
+    local width, _, h, y = layoutMetrics(currentApp)
 
     local rightPadding = 8
     local gap = 6
@@ -418,15 +482,16 @@ local function setLoadError(reason)
     state.loaded = false
     state.loadError = reason or "Load failed"
     state.needsRender = true
-    rfsuite.app.triggers.closeProgressLoader = true
+    requestLoaderClose()
 end
 
 local function readModeRangesExtra()
-    local API = rfsuite.tasks.msp.api.load("MODE_RANGES_EXTRA")
+    local API = tasks.msp.api.load("MODE_RANGES_EXTRA")
     if not API then
         setLoadError("MODE_RANGES_EXTRA API unavailable")
         return
     end
+    if API.setTimeout then API.setTimeout(API_READ_TIMEOUT) end
 
     API.setCompleteHandler(function()
         state.modeRangesExtra = API.readValue("mode_ranges_extra") or {}
@@ -436,24 +501,28 @@ local function readModeRangesExtra()
         state.loadError = nil
         buildModesFromRaw()
         state.needsRender = true
-        rfsuite.app.triggers.closeProgressLoader = true
+        requestLoaderClose()
     end)
 
     API.setErrorHandler(function()
         setLoadError("Failed reading mode range extras")
     end)
 
-    API.read()
+    if API.read() ~= true then
+        setLoadError("Failed queueing mode range extras read")
+    end
 end
 
 local function readModeRanges()
-    local API = rfsuite.tasks.msp.api.load("MODE_RANGES")
+    local API = tasks.msp.api.load("MODE_RANGES")
     if not API then
         setLoadError("MODE_RANGES API unavailable")
         return
     end
+    if API.setTimeout then API.setTimeout(API_READ_TIMEOUT) end
 
     API.setCompleteHandler(function()
+        updateLoader("Loading mode range extras", {watchdogTimeout = 10.0, transferInfo = true})
         state.modeRanges = API.readValue("mode_ranges") or {}
         readModeRangesExtra()
     end)
@@ -462,36 +531,57 @@ local function readModeRanges()
         setLoadError("Failed reading mode ranges")
     end)
 
-    API.read()
+    if API.read() ~= true then
+        setLoadError("Failed queueing mode ranges read")
+    end
 end
 
 local function readBoxNames()
-    local API = rfsuite.tasks.msp.api.load("BOXNAMES")
+    local API = tasks.msp.api.load("BOXNAMES")
     if not API then
         setLoadError("BOXNAMES API unavailable")
         return
     end
+    if API.setTimeout then API.setTimeout(API_READ_TIMEOUT) end
 
     API.setCompleteHandler(function()
+        state.boxNamesRetryCount = 0
+        updateLoader("Loading mode ranges", {watchdogTimeout = 10.0, transferInfo = true})
         state.modeNames = API.readValue("box_names") or {}
         readModeRanges()
     end)
 
     API.setErrorHandler(function()
+        if state.boxNamesRetryCount < BOXNAMES_RETRY_LIMIT then
+            state.boxNamesRetryCount = state.boxNamesRetryCount + 1
+            updateLoader("Retrying mode names", {watchdogTimeout = 10.0, transferInfo = true})
+            readBoxNames()
+            return
+        end
         setLoadError("Failed reading mode names")
     end)
 
-    API.read()
+    if API.read() ~= true then
+        if state.boxNamesRetryCount < BOXNAMES_RETRY_LIMIT then
+            state.boxNamesRetryCount = state.boxNamesRetryCount + 1
+            updateLoader("Retrying mode names", {watchdogTimeout = 10.0, transferInfo = true})
+            readBoxNames()
+            return
+        end
+        setLoadError("Failed queueing mode names read")
+    end
 end
 
 local function readBoxIds()
-    local API = rfsuite.tasks.msp.api.load("BOXIDS")
+    local API = tasks.msp.api.load("BOXIDS")
     if not API then
         setLoadError("BOXIDS API unavailable")
         return
     end
+    if API.setTimeout then API.setTimeout(API_READ_TIMEOUT) end
 
     API.setCompleteHandler(function()
+        updateLoader("Loading mode names", {watchdogTimeout = 10.0, transferInfo = true})
         state.modeIds = API.readValue("box_ids") or {}
         readBoxNames()
     end)
@@ -500,7 +590,9 @@ local function readBoxIds()
         setLoadError("Failed reading mode IDs")
     end)
 
-    API.read()
+    if API.read() ~= true then
+        setLoadError("Failed queueing mode IDs read")
+    end
 end
 
 local function startLoad()
@@ -510,10 +602,24 @@ local function startLoad()
     state.saveError = nil
     state.autoDetectSlots = {}
     state.channelSources = {}
+    state.boxNamesRetryCount = 0
     state.needsRender = true
-    local page = rfsuite.app and rfsuite.app.Page or nil
+    local page = app and app.Page or nil
     local speed = page and tonumber(page.loaderspeed) or MODULE_LOADER_SPEED
-    rfsuite.app.ui.progressDisplay("Modes", "Loading mode configuration", speed)
+    if app and app.ui and app.ui.showLoader then
+        app.ui.showLoader({
+            kind = "progress",
+            title = "Modes",
+            message = "Loading mode configuration",
+            speed = speed,
+            watchdogTimeout = 20.0,
+            transferInfo = true,
+            closeWhenIdle = true,
+            modal = true
+        })
+    else
+        app.ui.progressDisplay("Modes", "Loading mode configuration", speed)
+    end
     readBoxIds()
 end
 
@@ -573,11 +679,16 @@ local function addRangeToSelectedMode()
 end
 
 local function render()
-    local app = rfsuite.app
+    local currentApp = app
     state.liveRangeFields = {}
     syncNavButtonsForState()
     form.clear()
-    app.ui.fieldHeader(state.title)
+    if currentApp and currentApp._addHeader and pageNode then
+        pageNode.title = state.title
+        currentApp:_addHeader(pageNode)
+    elseif currentApp and currentApp.setHeaderTitle then
+        currentApp:setHeaderTitle(state.title)
+    end
 
     if state.loading then
         form.addLine("Loading mode data...")
@@ -594,9 +705,7 @@ local function render()
         return
     end
 
-    local width = app.lcdWidth
-    local h = app.radio.navbuttonHeight
-    local y = app.radio.linePaddingTop
+    local width, _, h, y = layoutMetrics(currentApp)
     local rightPadding = 8
     local buttonW = math.floor(width * 0.24)
     local buttonH = h
@@ -757,7 +866,19 @@ end
 local function saveAllRanges()
     state.saving = true
     state.saveError = nil
-    rfsuite.app.ui.progressDisplay("Modes", "Saving mode configuration")
+    if app and app.ui and app.ui.showLoader then
+        app.ui.showLoader({
+            kind = "save",
+            title = "Modes",
+            message = "Saving mode configuration",
+            watchdogTimeout = 16.0,
+            transferInfo = true,
+            closeWhenIdle = true,
+            modal = true
+        })
+    else
+        app.ui.progressDisplay("Modes", "Saving mode configuration")
+    end
 
     local slot = 1
     local total = #state.modeRanges
@@ -766,7 +887,7 @@ local function saveAllRanges()
         state.saving = false
         state.saveError = reason or "Save failed"
         state.needsRender = true
-        rfsuite.app.triggers.closeProgressLoader = true
+        requestLoaderClose()
     end
 
     local function writeNext()
@@ -776,7 +897,7 @@ local function saveAllRanges()
                 state.dirty = false
                 state.saveError = nil
                 state.needsRender = true
-                rfsuite.app.triggers.closeProgressLoader = true
+                requestLoaderClose()
             end, failed)
             return
         end
@@ -792,7 +913,7 @@ end
 
 local function onSaveMenu()
     if state.loading or state.saving or not state.loaded then return end
-    local pref = rfsuite.preferences and rfsuite.preferences.general and rfsuite.preferences.general.save_dirty_only
+    local pref = preferences and preferences.general and preferences.general.save_dirty_only
     local requireDirty = not (pref == false or pref == "false")
     if requireDirty and (not state.dirty) then return end
 
@@ -810,7 +931,7 @@ local function onSaveMenu()
         return
     end
 
-    if rfsuite.preferences.general.save_confirm == false or rfsuite.preferences.general.save_confirm == "false" then
+    if preferences.general.save_confirm == false or preferences.general.save_confirm == "false" then
         saveAllRanges()
         return
     end
@@ -850,10 +971,10 @@ local function openPage(opts)
     local idx = opts.idx
     state.title = opts.title or "Modes"
 
-    rfsuite.app.lastIdx = idx
-    rfsuite.app.lastTitle = state.title
-    rfsuite.app.lastScript = opts.script
-    rfsuite.session.lastPage = opts.script
+    app.lastIdx = idx
+    app.lastTitle = state.title
+    app.lastScript = opts.script
+    session.lastPage = opts.script
 
     startLoad()
     state.needsRender = true
@@ -861,11 +982,12 @@ end
 
 return {
     title = "Modes",
+    setContext = setContext,
     openPage = openPage,
     wakeup = wakeup,
+    canSave = canSave,
     onSaveMenu = onSaveMenu,
     onReloadMenu = onReloadMenu,
-    onNavMenu = navHandlers.onNavMenu,
     eepromWrite = false,
     reboot = false,
     navButtons = {menu = true, save = true, reload = true, tool = false, help = true},
