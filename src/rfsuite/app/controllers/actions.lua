@@ -36,6 +36,10 @@ function controller:_confirmAction(title, message, action)
                     app.modalDialogDepth = math.max(0, (app.modalDialogDepth or 0) - 1)
                     app.pendingDialogAction = action
                     app.pendingDialogActionReady = false
+                    app.pendingDialogActionLocked = true
+                    if app and app._syncActionLockState then
+                        app:_syncActionLockState()
+                    end
                     return true
                 end
             },
@@ -43,6 +47,12 @@ function controller:_confirmAction(title, message, action)
                 label = "@i18n(app.btn_cancel)@",
                 action = function()
                     app.modalDialogDepth = math.max(0, (app.modalDialogDepth or 0) - 1)
+                    app.pendingDialogAction = nil
+                    app.pendingDialogActionReady = false
+                    app.pendingDialogActionLocked = false
+                    if app and app._syncActionLockState then
+                        app:_syncActionLockState()
+                    end
                     return true
                 end
             }
@@ -60,6 +70,18 @@ function controller:handleSaveAction()
     local result
     local customResult
     local handled
+    local function unlock()
+        if app then
+            app.pendingDialogActionLocked = false
+            if app._syncActionLockState then
+                app:_syncActionLockState()
+            end
+        end
+    end
+
+    if app and app.pendingDialogActionLocked == true then
+        return true
+    end
 
     if app and app._canSaveNode and not app:_canSaveNode(node) then
         return false
@@ -76,6 +98,7 @@ function controller:handleSaveAction()
         if app and app._runNodeHook then
             result = app:_runNodeHook(node, "save")
         end
+        unlock()
         if result == false then
             return false
         end
@@ -83,6 +106,11 @@ function controller:handleSaveAction()
             app:setPageDirty(false)
         end
         return true
+    end
+
+    app.pendingDialogActionLocked = true
+    if app._syncActionLockState then
+        app:_syncActionLockState()
     end
 
     if app and app._confirmBeforeSave and app:_confirmBeforeSave() == true then
@@ -98,6 +126,10 @@ function controller:handleReloadAction()
     local result
     local customResult
     local handled
+
+    if app and app.pendingDialogActionLocked == true then
+        return true
+    end
 
     if app and app._runNodeHook then
         customResult, handled = app:_runNodeHook(node, "onReloadMenu")
@@ -120,7 +152,13 @@ function controller:handleReloadAction()
     end
 
     if app and app._confirmBeforeReload and app:_confirmBeforeReload() == true then
-        return self:_confirmAction("Reload Settings", "Discard changes and reload?", runReload)
+        return self:_confirmAction("Reload Settings", "Discard changes and reload?", runReload, {
+            kind = "progress",
+            title = node and node.title or "Reload Settings",
+            message = "Reloading values.",
+            closeWhenIdle = false,
+            modal = true
+        })
     end
 
     return runReload()
@@ -132,6 +170,10 @@ function controller:handleMenuAction()
     local pathStack = app and app.pathStack or {}
     local result
     local handled
+
+    if app and app.pendingDialogActionLocked == true then
+        return true
+    end
 
     if app and app._runNodeHook then
         result, handled = app:_runNodeHook(node, "onNavMenu")
@@ -158,6 +200,10 @@ function controller:handleToolAction()
     local result
     local handled
 
+    if app and app.pendingDialogActionLocked == true then
+        return true
+    end
+
     if app and app._runNodeHook then
         result, handled = app:_runNodeHook(node, "onToolMenu")
         if handled == true then
@@ -178,6 +224,10 @@ function controller:handleHelpAction()
     local node = app and app.currentNode or nil
     local result
     local handled
+
+    if app and app.pendingDialogActionLocked == true then
+        return true
+    end
 
     if app and app._runNodeHook then
         result, handled = app:_runNodeHook(node, "onHelpMenu")

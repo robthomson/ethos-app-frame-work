@@ -150,6 +150,8 @@ function controller:addNavigationButtons()
         if field and field.enable then
             if def.key == "save" then
                 field:enable(app and app._canSaveNode and app:_canSaveNode(node) or false)
+            elseif def.key == "menu" then
+                field:enable(def.visible == true and not (app and app.pendingDialogActionLocked == true))
             else
                 field:enable(def.visible == true)
             end
@@ -212,6 +214,18 @@ function controller:syncSaveButtonState()
 
     if save and save.enable then
         save:enable(app and app._canSaveNode and app:_canSaveNode(node) or false)
+    end
+end
+
+function controller:syncActionLockState()
+    local app = self:_app()
+    local navFields = app and app.navFields or nil
+    local node = app and app.currentNode or nil
+    local menu = navFields and navFields.menu or nil
+    local navConfig = self:buttonsForNode(node)
+
+    if menu and menu.enable then
+        menu:enable(navConfig.menu.enabled == true and not (app and app.pendingDialogActionLocked == true))
     end
 end
 

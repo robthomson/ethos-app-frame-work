@@ -369,6 +369,7 @@ function App:init(framework)
     self.emptyMenuBuildRetrySource = nil
     self.pendingDialogAction = nil
     self.pendingDialogActionReady = false
+    self.pendingDialogActionLocked = false
     self.modalDialogDepth = 0
     self.formBuildCount = 0
     self.mspTask = nil
@@ -855,6 +856,10 @@ end
 
 function App:_syncSaveButtonState()
     return self.navigationController:syncSaveButtonState()
+end
+
+function App:_syncActionLockState()
+    return self.navigationController:syncActionLockState()
 end
 
 function App:_focusNavigationButton(key)
@@ -2112,19 +2117,38 @@ function App:_updateValueFields()
 end
 
 function App:wakeup()
+    local modalUiActive = (self.loader and self.loader.active and self.loader.active.modal == true)
+        or ((self.modalDialogDepth or 0) > 0)
+
     if self.callback then
         self.callback:wakeup(APP_CALLBACK_WAKEUP_OPTIONS)
     end
 
-    if self.pendingDialogAction and self:_modalUiActive() ~= true and self.pendingDialogActionReady ~= true then
+    if self.pendingDialogAction and modalUiActive ~= true and self.pendingDialogActionReady ~= true then
         self.pendingDialogActionReady = true
-    elseif self.pendingDialogAction and self:_modalUiActive() ~= true then
+    elseif self.pendingDialogAction and modalUiActive ~= true then
         local pendingAction = self.pendingDialogAction
+        local ok
+        local err
         self.pendingDialogAction = nil
         self.pendingDialogActionReady = false
-        pendingAction()
-    elseif self:_modalUiActive() == true then
+        ok, err = pcall(pendingAction)
+        if not ok and self.framework and self.framework.log and self.framework.log.error then
+            self.framework.log:error("Pending dialog action error: %s", tostring(err))
+        end
+        if self.pendingDialogActionLocked == true then
+            self.pendingDialogActionLocked = false
+            if self._syncActionLockState then
+                self:_syncActionLockState()
+            end
+        end
+    elseif modalUiActive == true then
         self.pendingDialogActionReady = false
+    elseif self.pendingDialogAction == nil then
+        self.pendingDialogActionLocked = false
+        if self._syncActionLockState then
+            self:_syncActionLockState()
+        end
     end
 
     if self.currentNode == nil then
@@ -2180,6 +2204,7 @@ function App:onActivate()
     self.returnMenuArmed = false
     self.pendingDialogAction = nil
     self.pendingDialogActionReady = false
+    self.pendingDialogActionLocked = false
     self.modalDialogDepth = 0
     self.lifecycleController:activate()
 end
@@ -2191,6 +2216,7 @@ function App:onDeactivate()
     self.returnMenuArmed = false
     self.pendingDialogAction = nil
     self.pendingDialogActionReady = false
+    self.pendingDialogActionLocked = false
     self.modalDialogDepth = 0
     self.lifecycleController:deactivate()
 end
@@ -2202,6 +2228,7 @@ function App:close()
     self.returnMenuArmed = false
     self.pendingDialogAction = nil
     self.pendingDialogActionReady = false
+    self.pendingDialogActionLocked = false
     self.modalDialogDepth = 0
     self.lifecycleController:close()
     self.callback = nil

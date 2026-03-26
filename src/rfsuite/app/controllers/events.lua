@@ -87,6 +87,11 @@ function controller:route(category, value, x, y)
         app.menuController:clearFocusRestore()
     end
 
+    if app and app.pendingDialogActionLocked == true then
+        suppressFollowupKeyEvent(value)
+        return true
+    end
+
     if app and (app.modalDialogDepth or 0) > 0 then
         return false
     end
