@@ -73,6 +73,7 @@ local MSP_API_STRUCTURE_WRITE = MSP_API_STRUCTURE_READ
 
 local function parseRead(buf)
     local result = nil
+
     core.parseMSPData(API_NAME, buf, MSP_API_STRUCTURE_READ, nil, nil, function(parsed)
         result = parsed
     end)
