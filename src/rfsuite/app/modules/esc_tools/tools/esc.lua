@@ -30,19 +30,47 @@ function Page:open(ctx)
     }
 
     function node:buildForm(app)
-        escTools.renderGrid(self, app, {{
-            title = "@i18n(app.modules.esc_tools.mfg.omp.name)@",
-            image = "app/modules/esc_tools/mfg/omp/omp.png",
-            press = function()
-                app:_enterItem(1, {
-                    id = "esc-tool-omp",
-                    kind = "page",
-                    path = "esc_tools/mfg/omp/tool.lua",
-                    title = "@i18n(app.modules.esc_tools.mfg.omp.name)@",
-                    subtitle = self.baseTitle
-                })
-            end
-        }})
+        escTools.renderGrid(self, app, {
+            {
+                title = "@i18n(app.modules.esc_tools.mfg.omp.name)@",
+                image = "app/modules/esc_tools/mfg/omp/omp.png",
+                press = function()
+                    app:_enterItem(1, {
+                        id = "esc-tool-omp",
+                        kind = "page",
+                        path = "esc_tools/mfg/omp/tool.lua",
+                        title = "@i18n(app.modules.esc_tools.mfg.omp.name)@",
+                        subtitle = self.baseTitle
+                    })
+                end
+            },
+            {
+                title = "@i18n(app.modules.esc_tools.mfg.ztw.name)@",
+                image = "app/modules/esc_tools/mfg/ztw/ztw.png",
+                press = function()
+                    app:_enterItem(2, {
+                        id = "esc-tool-ztw",
+                        kind = "page",
+                        path = "esc_tools/mfg/ztw/tool.lua",
+                        title = "@i18n(app.modules.esc_tools.mfg.ztw.name)@",
+                        subtitle = self.baseTitle
+                    })
+                end
+            },
+            {
+                title = "@i18n(app.modules.esc_tools.mfg.xdfly.name)@",
+                image = "app/modules/esc_tools/mfg/xdfly/xdfly.png",
+                press = function()
+                    app:_enterItem(3, {
+                        id = "esc-tool-xdfly",
+                        kind = "page",
+                        path = "esc_tools/mfg/xdfly/tool.lua",
+                        title = "@i18n(app.modules.esc_tools.mfg.xdfly.name)@",
+                        subtitle = self.baseTitle
+                    })
+                end
+            }
+        })
     end
 
     function node:wakeup()

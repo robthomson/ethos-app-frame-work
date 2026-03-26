@@ -5,12 +5,12 @@
 
 local utils = require("lib.utils")
 local escTools = assert(loadfile("app/modules/esc_tools/lib.lua"))()
-local omp = assert(loadfile("app/modules/esc_tools/mfg/omp/init.lua"))()
-local pages = assert(loadfile("app/modules/esc_tools/mfg/omp/pages.lua"))()
+local ztw = assert(loadfile("app/modules/esc_tools/mfg/ztw/init.lua"))()
+local pages = assert(loadfile("app/modules/esc_tools/mfg/ztw/pages.lua"))()
 
-local API_NAME = "ESC_PARAMETERS_OMP"
-local SESSION_ACTIVE_FIELDS = "esc_tools_omp_active_fields"
-local SESSION_DETAILS = "esc_tools_omp_details"
+local API_NAME = "ESC_PARAMETERS_ZTW"
+local SESSION_ACTIVE_FIELDS = "esc_tools_ztw_active_fields"
+local SESSION_DETAILS = "esc_tools_ztw_details"
 
 local function unloadApi(node)
     local api = node.state.api
@@ -59,7 +59,7 @@ local function beginLoad(node, showLoader)
     end
 
     if not api then
-        node.state.error = "ESC_PARAMETERS_OMP unavailable."
+        node.state.error = "ESC_PARAMETERS_ZTW unavailable."
         escTools.clearLoader(node.app)
         return false
     end
@@ -73,7 +73,7 @@ local function beginLoad(node, showLoader)
         api.setTimeout(8.0)
     end
     if api.setUUID then
-        api.setUUID(utils.uuid("esc-omp-tool"))
+        api.setUUID(utils.uuid("esc-ztw-tool"))
     end
 
     api.setCompleteHandler(function()
@@ -88,8 +88,8 @@ local function beginLoad(node, showLoader)
         end
 
         node.state.loaded = true
-        node.state.details = omp.details(parsed)
-        node.state.activeFields = omp.activeFields(parsed)
+        node.state.details = ztw.details(parsed)
+        node.state.activeFields = ztw.activeFields(parsed)
         escTools.setSessionValue(node.app, SESSION_DETAILS, node.state.details)
         escTools.setSessionValue(node.app, SESSION_ACTIVE_FIELDS, node.state.activeFields)
         escTools.clearLoader(node.app)
@@ -104,7 +104,7 @@ local function beginLoad(node, showLoader)
             return
         end
 
-        node.state.error = tostring(reason or "ESC_PARAMETERS_OMP read failed.")
+        node.state.error = tostring(reason or "ESC_PARAMETERS_ZTW read failed.")
         escTools.clearLoader(node.app)
         node.app:_invalidateForm()
     end)
@@ -112,7 +112,7 @@ local function beginLoad(node, showLoader)
     if api.read() ~= true then
         unloadApi(node)
         node.state.loading = false
-        node.state.error = "ESC_PARAMETERS_OMP read failed."
+        node.state.error = "ESC_PARAMETERS_ZTW read failed."
         escTools.clearLoader(node.app)
         return false
     end
@@ -140,14 +140,14 @@ function Page:open(ctx)
 
     local node = {
         app = ctx.app,
-        baseTitle = ctx.item.title or "@i18n(app.modules.esc_tools.mfg.omp.name)@",
-        title = ctx.item.title or "@i18n(app.modules.esc_tools.mfg.omp.name)@",
+        baseTitle = ctx.item.title or "@i18n(app.modules.esc_tools.mfg.ztw.name)@",
+        title = ctx.item.title or "@i18n(app.modules.esc_tools.mfg.ztw.name)@",
         subtitle = ctx.item.subtitle or "@i18n(app.modules.esc_tools.name)@",
         breadcrumb = ctx.breadcrumb,
         showLoaderOnEnter = true,
         loaderOnEnter = {
             kind = "progress",
-            title = ctx.item.title or "@i18n(app.modules.esc_tools.mfg.omp.name)@",
+            title = ctx.item.title or "@i18n(app.modules.esc_tools.mfg.ztw.name)@",
             message = "@i18n(app.modules.esc_tools.waitingforesc)@",
             closeWhenIdle = false,
             watchdogTimeout = 12.0,
@@ -199,7 +199,7 @@ function Page:open(ctx)
                 image = currentPage.image,
                 press = function()
                     app:_enterItem(currentIndex, {
-                        id = "esc-omp-" .. tostring(currentPage.id),
+                        id = "esc-ztw-" .. tostring(currentPage.id),
                         kind = "page",
                         path = currentPage.path,
                         title = currentPage.title,
