@@ -373,6 +373,42 @@ function framework:getApp()
     return self._app
 end
 
+function framework:_clearAppScopedCaches()
+    local mspMeta = self._taskMetadata and self._taskMetadata.msp or nil
+    local mspTask = mspMeta and mspMeta.instance or nil
+
+    if mspTask and mspTask.api and mspTask.api.reset then
+        pcall(mspTask.api.reset, mspTask.api)
+    elseif mspTask and mspTask.api and mspTask.api.resetData then
+        pcall(mspTask.api.resetData, mspTask.api)
+    end
+
+    if self.log and self.log.reset then
+        pcall(self.log.reset, self.log)
+    end
+
+    self._memoryDebugHistory = {}
+
+    setSessionValues(self.session, {
+        memDebugLabel = nil,
+        memDebugLuaKB = 0,
+        memDebugDeltaLuaKB = 0,
+        memDebugPackageLoaded = 0,
+        memDebugPackageLoadedApp = 0,
+        memDebugCallbackQueued = 0,
+        memDebugEventHandlers = 0,
+        memDebugMspLoaded = 0,
+        memDebugMspHelp = 0,
+        memDebugMspHelpMiss = 0,
+        memDebugMspDataApis = 0,
+        memDebugMspDataEntries = 0,
+        logQueueDepth = 0,
+        logConnectDepth = 0,
+        logDroppedConsole = 0,
+        logDroppedConnect = 0
+    })
+end
+
 function framework:_createAppInstance()
     if self._app ~= nil then
         return self._app
@@ -458,11 +494,15 @@ function framework:deactivateApp()
         if type(self._appUnloader) == "function" then
             pcall(self._appUnloader, self)
         end
+        self:_clearAppScopedCaches()
         self.session:set("appResident", false)
+        collectgarbage("collect")
         collectgarbage("collect")
     elseif self._appReleaseOnDeactivate == true then
         self._app = nil
+        self:_clearAppScopedCaches()
         self.session:set("appResident", false)
+        collectgarbage("collect")
         collectgarbage("collect")
     else
         self.session:set("appResident", self._app ~= nil)
@@ -483,12 +523,15 @@ function framework:releaseInactiveApp(reason)
         pcall(self._appUnloader, self)
     end
 
+    self:_clearAppScopedCaches()
+
     self.session:setMultipleSilent({
         appResident = false,
         appCleanupPending = false,
         appCleanupDueAt = 0,
         appCleanupReason = reason or "release"
     })
+    collectgarbage("collect")
     collectgarbage("collect")
     self:captureMemoryDebug("app_release:" .. tostring(reason or "release"))
     return true

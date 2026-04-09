@@ -339,15 +339,53 @@ local function listLayout(app)
     return padding, buttonW, buttonH, perRow, iconSize
 end
 
-local function loadMask(state, filename)
-    local path = "app/modules/servos/gfx/" .. tostring(filename or "")
+local function loadSharedMask(path)
+    local loaded
+    local cache
+    local mask
 
-    state.icons = state.icons or {}
-    if state.icons[path] == nil then
-        state.icons[path] = lcd.loadMask(path)
+    if type(path) ~= "string" or path == "" then
+        return nil
     end
 
-    return state.icons[path]
+    if not (package and type(package.loaded) == "table") then
+        return lcd and lcd.loadMask and lcd.loadMask(path) or nil
+    end
+
+    loaded = package.loaded
+    cache = loaded["framework.__rf_mask_cache"]
+    if type(cache) ~= "table" then
+        cache = {
+            items = {},
+            order = {},
+            maxEntries = 96
+        }
+        loaded["framework.__rf_mask_cache"] = cache
+    end
+
+    if cache.items[path] ~= nil then
+        return cache.items[path]
+    end
+
+    mask = lcd and lcd.loadMask and lcd.loadMask(path) or nil
+    if mask == nil then
+        return nil
+    end
+
+    cache.items[path] = mask
+    cache.order[#cache.order + 1] = path
+    while #cache.order > (cache.maxEntries or 96) do
+        local evict = table.remove(cache.order, 1)
+        cache.items[evict] = nil
+    end
+
+    return mask
+end
+
+local function loadMask(state, filename)
+    local path = "app/modules/servos/gfx/" .. tostring(filename or "")
+    local _ = state
+    return loadSharedMask(path)
 end
 
 local function openHelp(title, key)

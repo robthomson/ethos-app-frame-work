@@ -5,6 +5,49 @@
 
 local escTools = {}
 
+local function loadSharedMask(path)
+    local loaded
+    local cache
+    local mask
+
+    if type(path) ~= "string" or path == "" then
+        return nil
+    end
+
+    if not (package and type(package.loaded) == "table") then
+        return lcd and lcd.loadMask and lcd.loadMask(path) or nil
+    end
+
+    loaded = package.loaded
+    cache = loaded["framework.__rf_mask_cache"]
+    if type(cache) ~= "table" then
+        cache = {
+            items = {},
+            order = {},
+            maxEntries = 96
+        }
+        loaded["framework.__rf_mask_cache"] = cache
+    end
+
+    if cache.items[path] ~= nil then
+        return cache.items[path]
+    end
+
+    mask = lcd and lcd.loadMask and lcd.loadMask(path) or nil
+    if mask == nil then
+        return nil
+    end
+
+    cache.items[path] = mask
+    cache.order[#cache.order + 1] = path
+    while #cache.order > (cache.maxEntries or 96) do
+        local evict = table.remove(cache.order, 1)
+        cache.items[evict] = nil
+    end
+
+    return mask
+end
+
 local function session(app)
     local framework = app and app.framework or nil
     return framework and framework.session or nil
@@ -147,13 +190,8 @@ function escTools.gridLayout(app)
 end
 
 function escTools.loadMask(state, path)
-    state.icons = state.icons or {}
-
-    if state.icons[path] == nil then
-        state.icons[path] = lcd.loadMask(path)
-    end
-
-    return state.icons[path]
+    local _ = state
+    return loadSharedMask(path)
 end
 
 function escTools.renderGrid(node, app, items)

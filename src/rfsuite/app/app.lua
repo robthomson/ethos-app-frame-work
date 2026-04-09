@@ -16,6 +16,29 @@ local actionsControllerFactory
 local eventsControllerFactory
 local lifecycleControllerFactory
 
+local function sharedMaskCache()
+    local loaded
+    local cache
+
+    if not (package and type(package.loaded) == "table") then
+        return nil
+    end
+
+    loaded = package.loaded
+    cache = loaded["framework.__rf_mask_cache"]
+    if type(cache) == "table" then
+        return cache
+    end
+
+    cache = {
+        items = {},
+        order = {},
+        maxEntries = 96
+    }
+    loaded["framework.__rf_mask_cache"] = cache
+    return cache
+end
+
 do
     local ok, mod = pcall(require, "app.shared.context")
     if ok and type(mod) == "table" then
@@ -137,8 +160,6 @@ local APP_RENDER_CALLBACK_WAKEUP_OPTIONS = {
 local APP_MAINTENANCE_PHASES = 3
 local SHORTCUTS_MODULE_CACHE = nil
 local MENU_VISIBILITY_MODULE_CACHE = nil
-local SHARED_MASK_CACHE = {}
-local SHARED_MASK_CACHE_ORDER = {}
 local LUA_TABLE_CACHE = {}
 
 local function countTableEntries(tbl)
@@ -379,8 +400,9 @@ function App:init(framework)
     self.valueFields = {}
     self.buttonFields = {}
     self.navFields = {}
-    self.maskCache = SHARED_MASK_CACHE
-    self.maskCacheOrder = SHARED_MASK_CACHE_ORDER
+    local sharedMasks = sharedMaskCache() or {items = {}, order = {}}
+    self.maskCache = sharedMasks.items
+    self.maskCacheOrder = sharedMasks.order
     self.pageDirty = false
     self.dirtySuspendDepth = 0
     self.returnMenuArmed = false
@@ -645,46 +667,38 @@ function App:_headerMetrics()
 end
 
 function App:_loadMask(path)
+    local cached
+    local mask
+
     if type(path) ~= "string" or path == "" then
         return nil
     end
 
-    local cached = self.maskCache[path]
+    cached = self.maskCache[path]
     if cached ~= nil then
         return cached
     end
 
-    local mask = lcd and lcd.loadMask and lcd.loadMask(path) or nil
-    if mask ~= nil then
-        self.maskCache[path] = mask
-        self.maskCacheOrder[#self.maskCacheOrder + 1] = path
+    mask = lcd and lcd.loadMask and lcd.loadMask(path) or nil
+    if mask == nil then
+        return nil
+    end
 
-        while #self.maskCacheOrder > MASK_CACHE_MAX do
-            local evict = table.remove(self.maskCacheOrder, 1)
-            self.maskCache[evict] = nil
-        end
+    self.maskCache[path] = mask
+    self.maskCacheOrder[#self.maskCacheOrder + 1] = path
+
+    while #self.maskCacheOrder > MASK_CACHE_MAX do
+        local evict = table.remove(self.maskCacheOrder, 1)
+        self.maskCache[evict] = nil
     end
 
     return mask
 end
 
 function App:_clearMaskCache()
-    local index
-    local path
-
-    if type(self.maskCacheOrder) == "table" then
-        for index = #self.maskCacheOrder, 1, -1 do
-            path = self.maskCacheOrder[index]
-            self.maskCacheOrder[index] = nil
-            if type(self.maskCache) == "table" then
-                self.maskCache[path] = nil
-            end
-        end
-    elseif type(self.maskCache) == "table" then
-        for path in pairs(self.maskCache) do
-            self.maskCache[path] = nil
-        end
-    end
+    -- Keep native mask handles resident across app sessions to avoid
+    -- repeated Ethos allocations that do not appear to return cleanly.
+    return true
 end
 
 function App:_clearLuaTableCache()
