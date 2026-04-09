@@ -9,6 +9,120 @@ local diagnostics = assert(loadfile("app/modules/diagnostics/lib.lua"))()
 local rates = assert(loadfile("app/modules/rates/lib.lua"))()
 local utils = require("lib.utils")
 
+local function buildSeedConfig(framework, tableId)
+    local config = rates.getRateTable(tableId, framework)
+
+    rates.populateFieldsFromApi(config.fields, nil)
+
+    return config
+end
+
+local function hasBuiltControls(state)
+    local index
+    local field
+
+    for index = 1, #(state and state.fields or {}) do
+        field = state.fields[index]
+        if field and field.control then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function canReuseFieldControls(existingFields, nextFields)
+    local index
+    local current
+    local incoming
+
+    if #existingFields ~= #nextFields then
+        return false
+    end
+
+    for index = 1, #existingFields do
+        current = existingFields[index]
+        incoming = nextFields[index]
+        if not current or not incoming or current.apikey ~= incoming.apikey or current.row ~= incoming.row or current.col ~= incoming.col then
+            return false
+        end
+    end
+
+    return true
+end
+
+local function mergeFieldConfig(target, source)
+    local control = target.control
+    local key
+
+    for key in pairs(target) do
+        if key ~= "control" then
+            target[key] = nil
+        end
+    end
+
+    for key, value in pairs(source or {}) do
+        target[key] = value
+    end
+
+    target.control = control
+    return target
+end
+
+local function syncFieldControl(field, enabled)
+    local control = field and field.control or nil
+    local minValue
+    local maxValue
+    local defaultValue
+
+    if not control then
+        return
+    end
+
+    minValue = tonumber(field.min) or 0
+    maxValue = tonumber(field.max) or 0
+
+    if field.decimals then
+        minValue = minValue * rates.decimalInc(field.decimals)
+        maxValue = maxValue * rates.decimalInc(field.decimals)
+    end
+    if field.mult then
+        minValue = minValue * field.mult
+        maxValue = maxValue * field.mult
+    end
+    if field.scale then
+        minValue = minValue / field.scale
+        maxValue = maxValue / field.scale
+    end
+
+    if control.minimum then
+        control:minimum(minValue)
+    end
+    if control.maximum then
+        control:maximum(maxValue)
+    end
+
+    defaultValue = rates.defaultDisplayValue(field)
+    if control.default then
+        control:default(defaultValue)
+    end
+    if field.decimals and control.decimals then
+        control:decimals(field.decimals)
+    end
+    if field.unit and control.suffix then
+        control:suffix(field.unit)
+    end
+    if field.step and control.step then
+        control:step(field.step)
+    end
+    if control.value then
+        control:value(rates.getFieldDisplayValue(field))
+    end
+    if control.enable then
+        control:enable(enabled == true and field.disable ~= true)
+    end
+end
+
 local function ensureApi(node)
     local state = node.state
     local mspTask
@@ -31,19 +145,31 @@ local function applyLoadedConfig(node, api)
     local state = node.state
     local tableId = api and api.readValue and api.readValue("rates_type") or nil
     local config = rates.getRateTable(tableId, node.app.framework)
+    local rebindControls = canReuseFieldControls(state.fields or {}, config.fields)
+    local index
 
     state.tableId = config.id
     state.tableName = config.name
     state.helpLines = config.help
     state.rows = config.rows
     state.cols = config.cols
-    state.fields = config.fields
+    if rebindControls then
+        for index = 1, #config.fields do
+            mergeFieldConfig(state.fields[index], config.fields[index])
+        end
+    else
+        state.fields = config.fields
+    end
     rates.populateFieldsFromApi(state.fields, api)
     node.app.framework.session:set("activeRateTable", state.tableId)
+
+    return rebindControls ~= true
 end
 
 local function finishRead(node)
     local state = node.state
+    local index
+    local field
 
     state.loading = false
 
@@ -52,7 +178,15 @@ local function finishRead(node)
     end
 
     node.app:requestLoaderClose()
-    node.app:_invalidateForm()
+    if state.needsRebuildAfterRead == true or hasBuiltControls(state) ~= true then
+        node.app:_invalidateForm()
+        return
+    end
+
+    for index = 1, #(state.fields or {}) do
+        field = state.fields[index]
+        syncFieldControl(field, true)
+    end
 end
 
 local function failRead(node, message)
@@ -73,6 +207,7 @@ end
 local function beginRead(node, showLoader)
     local state = node.state
     local api = ensureApi(node)
+    local index
 
     if not api then
         failRead(node, "api_missing_RC_TUNING")
@@ -81,6 +216,11 @@ local function beginRead(node, showLoader)
 
     state.loading = true
     state.error = nil
+    if hasBuiltControls(state) then
+        for index = 1, #(state.fields or {}) do
+            syncFieldControl(state.fields[index], false)
+        end
+    end
 
     if showLoader ~= false then
         node.app.ui.showLoader({
@@ -98,7 +238,7 @@ local function beginRead(node, showLoader)
         if not rates.nodeIsOpen(node) then
             return
         end
-        applyLoadedConfig(node, api)
+        state.needsRebuildAfterRead = applyLoadedConfig(node, api)
         state.loaded = true
         finishRead(node)
     end)
@@ -221,12 +361,7 @@ end
 
 function Page:open(ctx)
     local state = {
-        rows = {},
-        cols = {},
-        fields = {},
         tableId = rates.resolveTableId(ctx.framework.session:get("activeRateTable", nil), ctx.framework),
-        tableName = "",
-        helpLines = {},
         loading = false,
         loaded = false,
         saving = false,
@@ -236,6 +371,7 @@ function Page:open(ctx)
         activeApi = nil,
         closed = false
     }
+    local seedConfig = buildSeedConfig(ctx.framework, state.tableId)
     local node = {
         baseTitle = ctx.item.title or "@i18n(app.modules.rates.name)@",
         title = ctx.item.title or "@i18n(app.modules.rates.name)@",
@@ -245,6 +381,12 @@ function Page:open(ctx)
         showLoaderOnEnter = true,
         state = state
     }
+
+    state.tableName = seedConfig.name
+    state.helpLines = seedConfig.help
+    state.rows = seedConfig.rows
+    state.cols = seedConfig.cols
+    state.fields = seedConfig.fields
 
     function node:buildForm(app)
         local line
@@ -272,12 +414,6 @@ function Page:open(ctx)
         if state.error then
             line = form.addLine("Status")
             form.addStaticText(line, nil, tostring(state.error))
-            return
-        end
-
-        if state.loaded ~= true then
-            line = form.addLine("Status")
-            form.addStaticText(line, nil, state.loading == true and "Loading..." or "Waiting...")
             return
         end
 
@@ -351,8 +487,8 @@ function Page:open(ctx)
             if currentField.step and currentField.control.step then
                 currentField.control:step(currentField.step)
             end
-            if currentField.disable == true and currentField.control.enable then
-                currentField.control:enable(false)
+            if currentField.control.enable then
+                currentField.control:enable(state.loaded == true and currentField.disable ~= true)
             end
         end
     end

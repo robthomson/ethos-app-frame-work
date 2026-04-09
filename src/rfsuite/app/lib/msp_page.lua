@@ -50,6 +50,18 @@ local function keepApisLoaded(node)
     return node and node.spec and node.spec.keepApisLoaded == true
 end
 
+local function buildFormWhileLoadingEnabled(nodeOrSpec)
+    local spec = type(nodeOrSpec) == "table" and (nodeOrSpec.spec or nodeOrSpec) or nil
+
+    return type(spec) == "table" and spec.buildFormWhileLoading ~= false
+end
+
+local function updateBuiltControlsInPlaceEnabled(nodeOrSpec)
+    local spec = type(nodeOrSpec) == "table" and (nodeOrSpec.spec or nodeOrSpec) or nil
+
+    return buildFormWhileLoadingEnabled(spec) and type(spec) == "table" and spec.updateBuiltControlsInPlace ~= false
+end
+
 local function copyTable(source)
     local out = {}
     local key
@@ -693,7 +705,7 @@ local function mergedField(node, fieldSpec)
     rawValue = api and api.readValue and api.readValue(fieldSpec.apikey) or nil
     if rawValue ~= nil then
         merged.value = fieldControlValue(merged, rawValue)
-    elseif node and node.spec and node.spec.buildFormWhileLoading == true and node.state and node.state.loaded ~= true then
+    elseif node and buildFormWhileLoadingEnabled(node) and node.state and node.state.loaded ~= true then
         merged.value = nil
     elseif merged.value == nil then
         merged.value = fieldDefaultValue(merged)
@@ -993,8 +1005,7 @@ end
 canRefreshBuiltControlsInPlace = function(node)
     return type(node) == "table"
         and type(node.spec) == "table"
-        and node.spec.buildFormWhileLoading == true
-        and node.spec.updateBuiltControlsInPlace == true
+        and updateBuiltControlsInPlaceEnabled(node)
         and hasBuiltControls(node) == true
 end
 
@@ -1872,7 +1883,8 @@ function MspPage.create(spec)
             end
 
             if self.state.loaded ~= true then
-                if self.spec.buildFormWhileLoading == true then
+                if buildFormWhileLoadingEnabled(self) then
+                    pcall(ensureApis, self)
                     if #(self.state.fields or {}) == 0 and #(self.state.labels or {}) == 0 and #(self.state.rows or {}) == 0 and #(self.state.columns or {}) == 0 then
                         prepareLayout(self)
                     end
@@ -1988,9 +2000,7 @@ function MspPage.create(spec)
             self.state.loading = true
             self.state.error = nil
             builtControls = hasBuiltControls(self)
-            refreshInPlace = self.spec.buildFormWhileLoading == true
-                and self.spec.updateBuiltControlsInPlace == true
-                and builtControls == true
+            refreshInPlace = updateBuiltControlsInPlaceEnabled(self) and builtControls == true
             self.state.reloadFullPending = self.spec.reloadFull == true
                 or builtControls ~= true
                 or (self.state.loaded ~= true and refreshInPlace ~= true)
