@@ -33,6 +33,8 @@ local relinkFlexRows
 local resumeDirtyAfterLoad
 local ensureApis
 local failRead
+local setBuiltControlsEnabled
+local canRefreshBuiltControlsInPlace
 local function noopHandler()
 end
 
@@ -430,6 +432,7 @@ local function queueReload(node, showLoader)
     local function prepareQueuedReload()
         local ok
         local err
+        local keepBuiltControls
 
         if type(node.state) ~= "table" then
             return
@@ -461,23 +464,30 @@ local function queueReload(node, showLoader)
         node.state.reloadQueued = false
         node.state.reloadPrepared = true
         node.state.preparedShowLoader = showLoader ~= false
+        keepBuiltControls = canRefreshBuiltControlsInPlace(node)
 
-        if node.app and node.app._invalidateForm then
+        if node.app and node.app._invalidateForm and keepBuiltControls ~= true then
             node.app:_invalidateForm()
         end
     end
+    local keepBuiltControls
 
     if nodeIsOpen(node) ~= true or node.state.reloadQueued == true or node.state.loading == true or node.state.saving == true then
         return false
     end
 
+    keepBuiltControls = canRefreshBuiltControlsInPlace(node)
     node.state.reloadQueued = true
     node.state.loading = true
     node.state.error = nil
     node.state.reloadPrepared = false
     node.state.preparedShowLoader = showLoader ~= false
 
-    if node.app and node.app._invalidateForm then
+    if keepBuiltControls == true then
+        setBuiltControlsEnabled(node, false)
+    end
+
+    if node.app and node.app._invalidateForm and keepBuiltControls ~= true then
         node.app:_invalidateForm()
     end
 
@@ -901,7 +911,11 @@ local function buildNumberField(line, pos, field)
         end)
 end
 
-local function buildControlAtPosition(line, field, pos)
+local function shouldBuildControlsEnabled(node)
+    return node and node.state and node.state.loaded == true
+end
+
+local function buildControlAtPosition(line, field, pos, enabled)
     local control
 
     if field.type == FIELD_TYPE_CHOICE or type(field.table) == "table" then
@@ -911,6 +925,9 @@ local function buildControlAtPosition(line, field, pos)
     end
 
     applyFieldDecoration(control, field)
+    if control and control.enable then
+        pcall(control.enable, control, enabled ~= false)
+    end
     field.control = control
     return control
 end
@@ -926,7 +943,7 @@ local function applyControlValue(control, value)
     return false
 end
 
-local function setBuiltControlsEnabled(node, enabled)
+setBuiltControlsEnabled = function(node, enabled)
     local index
     local field
 
@@ -973,6 +990,14 @@ local function hasBuiltControls(node)
     return false
 end
 
+canRefreshBuiltControlsInPlace = function(node)
+    return type(node) == "table"
+        and type(node.spec) == "table"
+        and node.spec.buildFormWhileLoading == true
+        and node.spec.updateBuiltControlsInPlace == true
+        and hasBuiltControls(node) == true
+end
+
 local function runControlStateSync(node)
     local ok
     local err
@@ -1004,15 +1029,15 @@ local function buildField(line, node, app, field)
         form.addStaticText(line, positions.text, tostring(field.t))
     end
 
-    return buildControlAtPosition(line, field, positions.field)
+    return buildControlAtPosition(line, field, positions.field, shouldBuildControlsEnabled(node))
 end
 
-local function buildFieldAtPosition(line, field, positions)
+local function buildFieldAtPosition(line, node, field, positions)
     if tostring(field.t or "") ~= "" then
         form.addStaticText(line, positions.text, tostring(field.t))
     end
 
-    return buildControlAtPosition(line, field, positions.field)
+    return buildControlAtPosition(line, field, positions.field, shouldBuildControlsEnabled(node))
 end
 
 local function rowSlotsStartX(node, app)
@@ -1060,7 +1085,7 @@ local function buildRowSlots(line, node, app, fields)
         field = fields[index]
         textW = math.min(labelW, math.max(0, slotW - fieldW - fieldGap))
         slotX = startX + ((index - 1) * (slotW + slotGap))
-        buildFieldAtPosition(line, field, {
+        buildFieldAtPosition(line, node, field, {
             text = {x = slotX, y = rowY, w = textW, h = rowH},
             field = {x = slotX + textW + fieldGap, y = rowY, w = fieldW, h = rowH}
         })
@@ -1327,7 +1352,7 @@ local function buildMatrixRow(line, node, app, row, columns, rowFields, metrics,
                 controlX = cellX + metrics.cellW - controlW
             end
 
-            buildControlAtPosition(line, field, {x = controlX, y = rowY, w = controlW, h = rowH})
+            buildControlAtPosition(line, field, {x = controlX, y = rowY, w = controlW, h = rowH}, shouldBuildControlsEnabled(node))
         end
     end
 end
@@ -1510,7 +1535,7 @@ local function buildFlexRow(line, node, app, row)
             textWidth = 0
         end
 
-        buildFieldAtPosition(line, cell, {
+        buildFieldAtPosition(line, node, cell, {
             text = {x = cellX, y = rowY, w = textWidth, h = rowH},
             field = {
                 x = cellX + textWidth + ((textWidth > 0) and fieldGap or 0),
@@ -1920,13 +1945,11 @@ function MspPage.create(spec)
                 field = fields[index]
                 if not (field.label ~= nil and field.inline ~= nil and groupedIndex[field.label] == true) then
                     line = form.addLine(tostring(field.t or field.apikey or "Field"))
-                    field.control = buildControlAtPosition(line, field, nil)
+                    field.control = buildControlAtPosition(line, field, nil, shouldBuildControlsEnabled(self))
                 end
             end
 
-            if self.state.loaded ~= true then
-                setBuiltControlsEnabled(self, false)
-            else
+            if self.state.loaded == true then
                 runControlStateSync(self)
             end
 
@@ -1940,6 +1963,8 @@ function MspPage.create(spec)
         function node:reload(showLoader, apisReady, deferStart)
             local ok
             local err
+            local builtControls
+            local refreshInPlace
             local shouldShowLoader = showLoader ~= false
 
             if type(showLoader) == "table" and showLoader.framework and apisReady == nil then
@@ -1962,11 +1987,18 @@ function MspPage.create(spec)
             self.state.reloadPrepared = false
             self.state.loading = true
             self.state.error = nil
+            builtControls = hasBuiltControls(self)
+            refreshInPlace = self.spec.buildFormWhileLoading == true
+                and self.spec.updateBuiltControlsInPlace == true
+                and builtControls == true
             self.state.reloadFullPending = self.spec.reloadFull == true
-                or self.state.loaded ~= true
-                or hasBuiltControls(self) ~= true
+                or builtControls ~= true
+                or (self.state.loaded ~= true and refreshInPlace ~= true)
             if self.state.reloadFullPending == true then
                 self.state.loaded = false
+            end
+            if refreshInPlace == true then
+                setBuiltControlsEnabled(self, false)
             end
             suspendDirtyDuringLoad(self)
 
@@ -2034,8 +2066,9 @@ function MspPage.create(spec)
 
         function node:wakeup()
             if self.state.needsInitialLoad == true and self.state.loading ~= true and self.state.loaded ~= true then
+                local showInitialLoader = self.showLoaderOnEnter == true or self.spec.showProgressWhileLoading == true
                 self.state.needsInitialLoad = false
-                self:reload(true, nil, true)
+                self:reload(showInitialLoader, nil, true)
                 return
             end
 

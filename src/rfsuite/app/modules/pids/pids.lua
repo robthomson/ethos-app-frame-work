@@ -10,6 +10,9 @@ return MspPage.create({
     title = "@i18n(app.modules.pids.name)@",
     titleProfileSuffix = "pid",
     refreshOnProfileChange = true,
+    showLoaderOnEnter = true,
+    buildFormWhileLoading = true,
+    updateBuiltControlsInPlace = true,
     eepromWrite = true,
     help = {
         "@i18n(app.modules.pids.help_p1)@",
