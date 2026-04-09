@@ -304,7 +304,7 @@ local function updateConflictControl(node, sensorId)
 
     if control then
         setControlValue(control, node.state.config[sensorId] == true)
-        setControlEnabled(control, node.state.sensorForceDisabled[sensorId] ~= true)
+        setControlEnabled(control, node.state.loaded == true and node.state.loading ~= true and node.state.sensorForceDisabled[sensorId] ~= true)
     end
 end
 
@@ -437,7 +437,9 @@ local function finishLoad(node)
     else
         node.app.ui.clearProgressDialog(true)
     end
-    if node.app and node.app._invalidateForm then
+    if next(state.sensorControls or {}) ~= nil then
+        refreshSensorControls(node)
+    elseif node.app and node.app._invalidateForm then
         node.app:_invalidateForm()
     end
 end
@@ -446,6 +448,7 @@ local function startLoad(node, showLoader)
     local state = node.state
     local mspTask = node.app.framework:getTask("msp")
     local generation
+    local existingControls = state.sensorControls
 
     local function fail(message)
         if generation ~= state.loadGeneration or nodeIsOpen(node) ~= true then
@@ -595,11 +598,14 @@ local function startLoad(node, showLoader)
     state.featureBitmap = 0
     state.config = {}
     state.savedConfig = {}
-    state.sensorControls = {}
+    state.sensorControls = existingControls or {}
     state.prevState = {}
     state.sensorForceDisabled = {}
     state.loadStarted = true
     refreshDirtyState(node)
+    if next(state.sensorControls or {}) ~= nil then
+        refreshSensorControls(node)
+    end
 
     if showLoader == true then
         node.app.ui.showLoader({
@@ -917,12 +923,6 @@ function Page:open(ctx)
             return
         end
 
-        if state.loading == true or state.loaded ~= true then
-            line = form.addLine("Status")
-            form.addStaticText(line, nil, state.loading == true and "Loading..." or "Waiting...")
-            return
-        end
-
         if state.saveError then
             line = form.addLine("Status")
             form.addStaticText(line, nil, tostring(state.saveError))
@@ -967,7 +967,7 @@ function Page:open(ctx)
                                 refreshDirtyState(node)
                             end)
                         state.sensorControls[sensorId] = control
-                        setControlEnabled(control, state.sensorForceDisabled[sensorId] ~= true)
+                        setControlEnabled(control, state.loaded == true and state.loading ~= true and state.sensorForceDisabled[sensorId] ~= true)
                     end
                 end
             end

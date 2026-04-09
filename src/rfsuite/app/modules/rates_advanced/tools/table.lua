@@ -37,7 +37,14 @@ local function finishRead(node)
     end
 
     node.app:requestLoaderClose()
-    node.app:_invalidateForm()
+    if state.rateTypeControl and state.rateTypeControl.value then
+        state.rateTypeControl:value(state.rateType)
+        if state.rateTypeControl.enable then
+            state.rateTypeControl:enable(true)
+        end
+    else
+        node.app:_invalidateForm()
+    end
 end
 
 local function beginRead(node, showLoader)
@@ -54,6 +61,9 @@ local function beginRead(node, showLoader)
 
     state.loading = true
     state.error = nil
+    if state.rateTypeControl and state.rateTypeControl.enable then
+        state.rateTypeControl:enable(false)
+    end
 
     if showLoader ~= false then
         node.app.ui.showLoader({
@@ -231,23 +241,19 @@ function Page:open(ctx)
     }
 
     function node:buildForm(app)
+        local line
+
         self.app = app
 
         rates.updateNodeTitle(self)
 
         if state.error then
-            local line = form.addLine("Status")
+            line = form.addLine("Status")
             form.addStaticText(line, nil, tostring(state.error))
             return
         end
 
-        if state.loaded ~= true then
-            local line = form.addLine("Status")
-            form.addStaticText(line, nil, state.loading == true and "Loading..." or "Waiting...")
-            return
-        end
-
-        form.addChoiceField(form.addLine("@i18n(app.modules.rates_advanced.rate_table)@"), nil, rates.getRateTypeChoices(),
+        state.rateTypeControl = form.addChoiceField(form.addLine("@i18n(app.modules.rates_advanced.rate_table)@"), nil, rates.getRateTypeChoices(),
             function()
                 return state.rateType
             end,
@@ -255,9 +261,12 @@ function Page:open(ctx)
                 state.rateType = tonumber(newValue) or state.currentRateType
                 app:setPageDirty(state.rateType ~= state.currentRateType)
             end)
+        if state.rateTypeControl and state.rateTypeControl.enable then
+            state.rateTypeControl:enable(state.loaded == true and state.loading ~= true)
+        end
 
         if state.rateType ~= state.currentRateType then
-            local line = form.addLine("Status")
+            line = form.addLine("Status")
             form.addStaticText(line, nil, "@i18n(app.modules.rates_advanced.msg_reset_to_defaults)@")
         end
     end
