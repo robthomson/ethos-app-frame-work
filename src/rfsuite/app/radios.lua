@@ -4,6 +4,8 @@
 ]] --
 
 local lcd = lcd
+local abs = math.abs
+local format = string.format
 
 local LCD_W, LCD_H = lcd.getWindowSize()
 local resolution = LCD_W .. "x" .. LCD_H
@@ -82,4 +84,38 @@ local supportedRadios = {
     }
 }
 
-return assert(supportedRadios[resolution], resolution .. " not supported")
+local function findClosestResolution(width, height, radios)
+    local chosenKey
+    local bestDistance
+
+    for resKey in pairs(radios) do
+        local resWidth, resHeight = resKey:match("^(%d+)x(%d+)$")
+
+        if resWidth and resHeight then
+            local distance = abs(width - tonumber(resWidth)) + abs(height - tonumber(resHeight))
+
+            if bestDistance == nil or distance < bestDistance then
+                chosenKey = resKey
+                bestDistance = distance
+            end
+        end
+    end
+
+    return chosenKey, bestDistance
+end
+
+local chosenResolution = resolution
+
+if not supportedRadios[chosenResolution] then
+    chosenResolution = findClosestResolution(LCD_W, LCD_H, supportedRadios)
+
+    if chosenResolution then
+        print(format("[app] %s not supported; using closest match %s", resolution, chosenResolution))
+    end
+end
+
+local radio = assert(supportedRadios[chosenResolution], resolution .. " not supported")
+radio.detectedResolution = resolution
+radio.selectedResolution = chosenResolution
+
+return radio
